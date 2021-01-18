@@ -149,7 +149,7 @@ KResult Socket::setsockopt(int level, int option, Userspace<const void*> user_va
         }
         return KSuccess;
     default:
-        dbg() << "setsockopt(" << option << ") at SOL_SOCKET not implemented.";
+        dbgln("setsockopt({}) at SOL_SOCKET not implemented.", option);
         return KResult(-ENOPROTOOPT);
     }
 }
@@ -188,7 +188,7 @@ KResult Socket::getsockopt(FileDescription&, int level, int option, Userspace<vo
     case SO_ERROR: {
         if (size < sizeof(int))
             return KResult(-EINVAL);
-        dbg() << "getsockopt(SO_ERROR): FIXME!";
+        dbgln("getsockopt(SO_ERROR): FIXME!");
         int errno = 0;
         if (!copy_to_user(static_ptr_cast<int*>(value), &errno))
             return KResult(-EFAULT);
@@ -226,7 +226,7 @@ KResult Socket::getsockopt(FileDescription&, int level, int option, Userspace<vo
             return KResult(-EFAULT);
         return KSuccess;
     default:
-        dbg() << "getsockopt(" << option << ") at SOL_SOCKET not implemented.";
+        dbgln("setsockopt({}) at SOL_SOCKET not implemented.", option);
         return KResult(-ENOPROTOOPT);
     }
 }

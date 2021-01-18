@@ -12,6 +12,7 @@ set(KERNEL_SOURCES
     ACPI/Parser.cpp
     Arch/i386/CPU.cpp
     Arch/i386/ProcessorInfo.cpp
+    Arch/i386/SafeMem.cpp
     Arch/PC/BIOS.cpp
     CMOS.cpp
     CommandLine.cpp
@@ -32,7 +33,7 @@ set(KERNEL_SOURCES
     Devices/RandomDevice.cpp
     Devices/SB16.cpp
     Devices/SerialDevice.cpp
-    Devices/UHCIController.cpp
+    Devices/USB/UHCIController.cpp
     Devices/VMWareBackdoor.cpp
     Devices/ZeroDevice.cpp
     Storage/Partition/DiskPartition.cpp
@@ -47,6 +48,7 @@ set(KERNEL_SOURCES
     Storage/PATADiskDevice.cpp
     Storage/StorageManagement.cpp
     DoubleBuffer.cpp
+    FileSystem/AnonymousFile.cpp
     FileSystem/BlockBasedFileSystem.cpp
     FileSystem/Custody.cpp
     FileSystem/DevFS.cpp
@@ -64,6 +66,7 @@ set(KERNEL_SOURCES
     FileSystem/ProcFS.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
+    FutexQueue.cpp
     Interrupts/APIC.cpp
     Interrupts/GenericInterruptHandler.cpp
     Interrupts/IOAPIC.cpp
@@ -96,14 +99,13 @@ set(KERNEL_SOURCES
     PerformanceEventBuffer.cpp
     Process.cpp
     ProcessGroup.cpp
-    Profiling.cpp
     Ptrace.cpp
     RTC.cpp
     Random.cpp
     Scheduler.cpp
-    SharedBuffer.cpp
     StdLib.cpp
     Syscall.cpp
+    Syscalls/anon_create.cpp
     Syscalls/abort.cpp
     Syscalls/access.cpp
     Syscalls/alarm.cpp
@@ -156,7 +158,6 @@ set(KERNEL_SOURCES
     Syscalls/setkeymap.cpp
     Syscalls/setpgid.cpp
     Syscalls/setuid.cpp
-    Syscalls/shbuf.cpp
     Syscalls/shutdown.cpp
     Syscalls/sigaction.cpp
     Syscalls/socket.cpp
@@ -206,7 +207,6 @@ set(KERNEL_SOURCES
     VM/Region.cpp
     VM/SharedInodeVMObject.cpp
     VM/VMObject.cpp
-    VirtualAddress.cpp
     WaitQueue.cpp
     init.cpp
     kprintf.cpp
@@ -232,26 +232,26 @@ set(AK_SOURCES
 )
 
 set(ELF_SOURCES
-    ../Libraries/LibELF/Image.cpp
-    ../Libraries/LibELF/Validation.cpp
+    ../Userland/Libraries/LibELF/Image.cpp
+    ../Userland/Libraries/LibELF/Validation.cpp
 )
 
 set(VT_SOURCES
-    ../Libraries/LibVT/Terminal.cpp
-    ../Libraries/LibVT/Line.cpp
+    ../Userland/Libraries/LibVT/Terminal.cpp
+    ../Userland/Libraries/LibVT/Line.cpp
 )
 
 set(KEYBOARD_SOURCES
-    ../Libraries/LibKeyboard/CharacterMap.cpp
+    ../Userland/Libraries/LibKeyboard/CharacterMap.cpp
 )
 
 set(CRYPTO_SOURCES
-    ../Libraries/LibCrypto/Cipher/AES.cpp
-    ../Libraries/LibCrypto/Hash/SHA2.cpp
+    ../Userland/Libraries/LibCrypto/Cipher/AES.cpp
+    ../Userland/Libraries/LibCrypto/Hash/SHA2.cpp
 )
 
 set(C_SOURCES
-    ../Libraries/LibC/ctype.cpp
+    ../Userland/Libraries/LibC/ctype.cpp
 )
 
 set(SOURCES

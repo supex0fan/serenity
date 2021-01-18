@@ -356,7 +356,7 @@ KeyboardDevice::~KeyboardDevice()
 bool KeyboardDevice::initialize()
 {
     if (!m_controller.reset_device(I8042Controller::Device::Keyboard)) {
-        dbg() << "KeyboardDevice: I8042 controller failed to reset device";
+        dbgln("KeyboardDevice: I8042 controller failed to reset device");
         return false;
     }
     return true;
@@ -408,7 +408,7 @@ void KeyboardDevice::set_maps(const Keyboard::CharacterMapData& character_map_da
 {
     m_character_map.set_character_map_data(character_map_data);
     m_character_map.set_character_map_name(character_map_name);
-    dbg() << "New Character map \"" << character_map_name << "\" passing to client.";
+    dbgln("New Character map '{}' passing to client.", character_map_name);
 }
 
 }

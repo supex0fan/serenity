@@ -213,7 +213,7 @@ Vector<StringView> String::split_view(const char separator, bool keep_empty) con
 ByteBuffer String::to_byte_buffer() const
 {
     if (!m_impl)
-        return nullptr;
+        return {};
     return ByteBuffer::copy(reinterpret_cast<const u8*>(characters()), length());
 }
 
@@ -467,6 +467,16 @@ String String::vformatted(StringView fmtstr, TypeErasedFormatParams params)
     StringBuilder builder;
     vformat(builder, fmtstr, params);
     return builder.to_string();
+}
+
+Optional<size_t> String::find(char c) const
+{
+    return find(StringView { &c, 1 });
+}
+
+Optional<size_t> String::find(const StringView& view) const
+{
+    return StringUtils::find(*this, view);
 }
 
 }

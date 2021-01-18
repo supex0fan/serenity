@@ -26,7 +26,7 @@ endfunction()
 
 function(serenity_lib target_name fs_name)
     serenity_install_headers(${target_name})
-    serenity_install_sources("Libraries/${target_name}")
+    serenity_install_sources("Userland/Libraries/${target_name}")
     #add_library(${target_name} SHARED ${SOURCES} ${GENERATED_SOURCES})
     add_library(${target_name} SHARED ${SOURCES} ${GENERATED_SOURCES})
     install(TARGETS ${target_name} DESTINATION usr/lib)
@@ -36,7 +36,7 @@ endfunction()
 
 function(serenity_shared_lib target_name fs_name)
     serenity_install_headers(${target_name})
-    serenity_install_sources("Libraries/${target_name}")
+    serenity_install_sources("Userland/Libraries/${target_name}")
     add_library(${target_name} SHARED ${SOURCES} ${GENERATED_SOURCES})
     install(TARGETS ${target_name} DESTINATION usr/lib)
     set_target_properties(${target_name} PROPERTIES OUTPUT_NAME ${fs_name})
@@ -45,7 +45,7 @@ endfunction()
 
 function(serenity_libc target_name fs_name)
     serenity_install_headers("")
-    serenity_install_sources("Libraries/LibC")
+    serenity_install_sources("Userland/Libraries/LibC")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdlib -fpic")
     add_library(${target_name} SHARED ${SOURCES})
     install(TARGETS ${target_name} DESTINATION usr/lib)
@@ -56,7 +56,7 @@ endfunction()
 
 function(serenity_libc_static target_name fs_name)
     serenity_install_headers("")
-    serenity_install_sources("Libraries/LibC")
+    serenity_install_sources("Userland/Libraries/LibC")
     add_library(${target_name} ${SOURCES})
     install(TARGETS ${target_name} ARCHIVE DESTINATION usr/lib)
     set_target_properties(${target_name} PROPERTIES OUTPUT_NAME ${fs_name})
@@ -108,7 +108,7 @@ function(compile_ipc source output)
     set(source ${CMAKE_CURRENT_SOURCE_DIR}/${source})
     add_custom_command(
         OUTPUT ${output}
-        COMMAND ${write_if_different} ${output} ${CMAKE_BINARY_DIR}/DevTools/IPCCompiler/IPCCompiler ${source}
+        COMMAND ${write_if_different} ${output} ${CMAKE_BINARY_DIR}/Userland/DevTools/IPCCompiler/IPCCompiler ${source}
         VERBATIM
         DEPENDS IPCCompiler
         MAIN_DEPENDENCY ${source}

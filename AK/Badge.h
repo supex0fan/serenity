@@ -30,8 +30,12 @@ namespace AK {
 
 template<typename T>
 class Badge {
+public:
+    using Type = T;
+
+private:
     friend T;
-    Badge() { }
+    constexpr Badge() = default;
 
     Badge(const Badge&) = delete;
     Badge& operator=(const Badge&) = delete;

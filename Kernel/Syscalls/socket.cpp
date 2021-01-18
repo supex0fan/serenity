@@ -115,7 +115,7 @@ int Process::sys$accept(int accepting_socket_fd, Userspace<sockaddr*> user_addre
     if (!socket.can_accept()) {
         if (accepting_socket_description->is_blocking()) {
             auto unblock_flags = Thread::FileBlocker::BlockFlags::None;
-            if (Thread::current()->block<Thread::AcceptBlocker>(nullptr, *accepting_socket_description, unblock_flags).was_interrupted())
+            if (Thread::current()->block<Thread::AcceptBlocker>({}, *accepting_socket_description, unblock_flags).was_interrupted())
                 return -EINTR;
         } else {
             return -EAGAIN;
@@ -208,7 +208,6 @@ ssize_t Process::sys$sendmsg(int sockfd, Userspace<const struct msghdr*> user_ms
     auto& socket = *description->socket();
     if (socket.is_shut_down_for_writing())
         return -EPIPE;
-    SmapDisabler disabler;
     auto data_buffer = UserOrKernelBuffer::for_user_buffer((u8*)iovs[0].iov_base, iovs[0].iov_len);
     if (!data_buffer.has_value())
         return -EFAULT;
@@ -235,8 +234,6 @@ ssize_t Process::sys$recvmsg(int sockfd, Userspace<struct msghdr*> user_msg, int
 
     Userspace<sockaddr*> user_addr((FlatPtr)msg.msg_name);
     Userspace<socklen_t*> user_addr_length(msg.msg_name ? (FlatPtr)&user_msg.unsafe_userspace_ptr()->msg_namelen : 0);
-
-    SmapDisabler disabler;
 
     auto description = file_description(sockfd);
     if (!description)

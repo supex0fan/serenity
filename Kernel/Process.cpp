@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,6 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <AK/Debug.h>
 #include <AK/Demangle.h>
 #include <AK/QuickSort.h>
 #include <AK/StdLibExtras.h>
@@ -44,10 +45,10 @@
 #include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/Process.h>
 #include <Kernel/RTC.h>
-#include <Kernel/SharedBuffer.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Thread.h>
+#include <Kernel/VM/AnonymousVMObject.h>
 #include <Kernel/VM/PageDirectory.h>
 #include <Kernel/VM/PrivateInodeVMObject.h>
 #include <Kernel/VM/ProcessPagingScope.h>
@@ -57,7 +58,6 @@
 
 //#define DEBUG_IO
 //#define DEBUG_POLL_SELECT
-//#define MM_DEBUG
 //#define PROCESS_DEBUG
 //#define SIGNAL_DEBUG
 
@@ -143,54 +143,56 @@ Region& Process::allocate_split_region(const Region& source_region, const Range&
     return region;
 }
 
-Region* Process::allocate_region(const Range& range, const String& name, int prot, AllocationStrategy strategy)
+KResultOr<Region*> Process::allocate_region(const Range& range, const String& name, int prot, AllocationStrategy strategy)
 {
     ASSERT(range.is_valid());
     auto vmobject = AnonymousVMObject::create_with_size(range.size(), strategy);
     if (!vmobject)
-        return nullptr;
+        return KResult(-ENOMEM);
     auto region = Region::create_user_accessible(this, range, vmobject.release_nonnull(), 0, name, prot_to_region_access_flags(prot));
     if (!region->map(page_directory()))
-        return nullptr;
+        return KResult(-ENOMEM);
     return &add_region(move(region));
 }
 
-Region* Process::allocate_region(VirtualAddress vaddr, size_t size, const String& name, int prot, AllocationStrategy strategy)
+KResultOr<Region*> Process::allocate_region(VirtualAddress vaddr, size_t size, const String& name, int prot, AllocationStrategy strategy)
 {
     auto range = allocate_range(vaddr, size);
     if (!range.is_valid())
-        return nullptr;
+        return KResult(-ENOMEM);
     return allocate_region(range, name, prot, strategy);
 }
 
-Region* Process::allocate_region_with_vmobject(const Range& range, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, const String& name, int prot, bool shared)
+KResultOr<Region*> Process::allocate_region_with_vmobject(const Range& range, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, const String& name, int prot, bool shared)
 {
     ASSERT(range.is_valid());
     size_t end_in_vmobject = offset_in_vmobject + range.size();
     if (end_in_vmobject <= offset_in_vmobject) {
-        dbg() << "allocate_region_with_vmobject: Overflow (offset + size)";
-        return nullptr;
+        dbgln("allocate_region_with_vmobject: Overflow (offset + size)");
+        return KResult(-EINVAL);
     }
     if (offset_in_vmobject >= vmobject->size()) {
-        dbg() << "allocate_region_with_vmobject: Attempt to allocate a region with an offset past the end of its VMObject.";
-        return nullptr;
+        dbgln("allocate_region_with_vmobject: Attempt to allocate a region with an offset past the end of its VMObject.");
+        return KResult(-EINVAL);
     }
     if (end_in_vmobject > vmobject->size()) {
-        dbg() << "allocate_region_with_vmobject: Attempt to allocate a region with an end past the end of its VMObject.";
-        return nullptr;
+        dbgln("allocate_region_with_vmobject: Attempt to allocate a region with an end past the end of its VMObject.");
+        return KResult(-EINVAL);
     }
     offset_in_vmobject &= PAGE_MASK;
     auto& region = add_region(Region::create_user_accessible(this, range, move(vmobject), offset_in_vmobject, name, prot_to_region_access_flags(prot), true, shared));
-    if (!region.map(page_directory()))
-        return nullptr;
+    if (!region.map(page_directory())) {
+        // FIXME: What is an appropriate error code here, really?
+        return KResult(-ENOMEM);
+    }
     return &region;
 }
 
-Region* Process::allocate_region_with_vmobject(VirtualAddress vaddr, size_t size, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, const String& name, int prot, bool shared)
+KResultOr<Region*> Process::allocate_region_with_vmobject(VirtualAddress vaddr, size_t size, NonnullRefPtr<VMObject> vmobject, size_t offset_in_vmobject, const String& name, int prot, bool shared)
 {
     auto range = allocate_range(vaddr, size);
     if (!range.is_valid())
-        return nullptr;
+        return KResult(-ENOMEM);
     return allocate_region_with_vmobject(range, move(vmobject), offset_in_vmobject, name, prot, shared);
 }
 
@@ -304,7 +306,7 @@ RefPtr<Process> Process::create_user_process(RefPtr<Thread>& first_thread, const
 
     error = process->exec(path, move(arguments), move(environment));
     if (error != 0) {
-        dbg() << "Failed to exec " << path << ": " << error;
+        dbgln("Failed to exec {}: {}", path, error);
         first_thread = nullptr;
         return {};
     }
@@ -354,14 +356,9 @@ Process::Process(RefPtr<Thread>& first_thread, const String& name, uid_t uid, gi
     , m_ppid(ppid)
     , m_wait_block_condition(*this)
 {
-#ifdef PROCESS_DEBUG
-    dbg() << "Created new process " << m_name << "(" << m_pid.value() << ")";
-#endif
+    dbgln<debug_process>("Created new process {}({})", m_name, m_pid.value());
 
     m_page_directory = PageDirectory::create_for_userspace(*this, fork_parent ? &fork_parent->page_directory().range_allocator() : nullptr);
-#ifdef MM_DEBUG
-    dbg() << "Process " << pid().value() << " ctor: PD=" << m_page_directory.ptr() << " created";
-#endif
 
     if (fork_parent) {
         // NOTE: fork() doesn't clone all threads; the thread that called fork() becomes the only thread in the new process.
@@ -407,7 +404,7 @@ void Process::dump_regions()
 
     for (auto& sorted_region : sorted_regions) {
         auto& region = *sorted_region;
-        klog() << String::format("%08x", region.vaddr().get()) << " -- " << String::format("%08x", region.vaddr().offset(region.size() - 1).get()) << "    " << String::format("%08x", region.size()) << "    " << (region.is_readable() ? 'R' : ' ') << (region.is_writable() ? 'W' : ' ') << (region.is_executable() ? 'X' : ' ') << (region.is_shared() ? 'S' : ' ') << (region.is_stack() ? 'T' : ' ') << (region.vmobject().is_anonymous() ? 'A' : ' ') << "    " << region.name().characters();
+        klog() << String::format("%08x", region.vaddr().get()) << " -- " << String::format("%08x", region.vaddr().offset(region.size() - 1).get()) << "    " << String::format("%08zx", region.size()) << "    " << (region.is_readable() ? 'R' : ' ') << (region.is_writable() ? 'W' : ' ') << (region.is_executable() ? 'X' : ' ') << (region.is_shared() ? 'S' : ' ') << (region.is_stack() ? 'T' : ' ') << (region.vmobject().is_anonymous() ? 'A' : ' ') << "    " << region.name().characters();
     }
     MM.dump_kernel_regions();
 }
@@ -469,13 +466,13 @@ void Process::crash(int signal, u32 eip, bool out_of_memory)
     ASSERT(Process::current() == this);
 
     if (out_of_memory) {
-        dbg() << "\033[31;1mOut of memory\033[m, killing: " << *this;
+        dbgln("\033[31;1mOut of memory\033[m, killing: {}", *this);
     } else {
         if (eip >= 0xc0000000 && g_kernel_symbols_available) {
             auto* symbol = symbolicate_kernel_address(eip);
-            dbg() << "\033[31;1m" << String::format("%p", eip) << "  " << (symbol ? demangle(symbol->name) : "(k?)") << " +" << (symbol ? eip - symbol->address : 0) << "\033[0m\n";
+            dbgln("\033[31;1m{:p}  {} +{}\033[0m\n", eip, (symbol ? demangle(symbol->name) : "(k?)"), (symbol ? eip - symbol->address : 0));
         } else {
-            dbg() << "\033[31;1m" << String::format("%p", eip) << "  (?)\033[0m\n";
+            dbgln("\033[31;1m{:p}  (?)\033[0m\n", eip);
         }
         dump_backtrace();
     }
@@ -590,53 +587,49 @@ KResultOr<String> Process::get_syscall_path_argument(const Syscall::StringArgume
     return get_syscall_path_argument(path.characters, path.length);
 }
 
+bool Process::dump_core()
+{
+    ASSERT(is_dumpable());
+    ASSERT(should_core_dump());
+    dbgln("Generating coredump for pid: {}", m_pid.value());
+    auto coredump_path = String::formatted("/tmp/coredump/{}_{}_{}", name(), m_pid.value(), RTC::now());
+    auto coredump = CoreDump::create(*this, coredump_path);
+    if (!coredump)
+        return false;
+    return !coredump->write().is_error();
+}
+
+bool Process::dump_perfcore()
+{
+    ASSERT(is_dumpable());
+    ASSERT(m_perf_event_buffer);
+    dbgln("Generating perfcore for pid: {}", m_pid.value());
+    auto description_or_error = VFS::the().open(String::formatted("perfcore.{}", m_pid.value()), O_CREAT | O_EXCL, 0400, current_directory(), UidAndGid { m_uid, m_gid });
+    if (description_or_error.is_error())
+        return false;
+    auto& description = description_or_error.value();
+    auto json = m_perf_event_buffer->to_json(m_pid, m_executable ? m_executable->absolute_path() : "");
+    if (!json)
+        return false;
+
+    auto json_buffer = UserOrKernelBuffer::for_kernel_buffer(json->data());
+    return !description->write(json_buffer, json->size()).is_error();
+}
+
 void Process::finalize()
 {
     ASSERT(Thread::current() == g_finalizer);
-#ifdef PROCESS_DEBUG
-    dbg() << "Finalizing process " << *this;
-#endif
 
-    if (is_profiling()) {
-        auto coredump = CoreDump::create(*this, String::formatted("/tmp/profiler_coredumps/{}", pid().value()));
-        if (coredump) {
-            auto result = coredump->write();
-            if (result.is_error())
-                dbgln("Core dump generation failed: {}", result.error());
-        } else {
-            dbgln("Could not create coredump");
-        }
-    }
-    if (m_should_dump_core) {
-        dbgln("Generating coredump for pid: {}", m_pid.value());
+    dbgln<debug_process>("Finalizing process {}", *this);
 
-        auto coredump_path = String::formatted("/tmp/coredump/{}_{}_{}", name(), m_pid.value(), RTC::now());
-        auto coredump = CoreDump::create(*this, coredump_path);
-        if (coredump) {
-            auto result = coredump->write();
-            if (result.is_error())
-                dbgln("Core dump generation failed: {}", result.error());
-        } else {
-            dbgln("Could not create coredump");
-        }
+    if (is_dumpable()) {
+        if (m_should_dump_core)
+            dump_core();
+        if (m_perf_event_buffer)
+            dump_perfcore();
     }
 
-    if (m_perf_event_buffer) {
-        auto description_or_error = VFS::the().open(String::format("perfcore.%d", m_pid), O_CREAT | O_EXCL, 0400, current_directory(), UidAndGid { m_uid, m_gid });
-        if (!description_or_error.is_error()) {
-            auto& description = description_or_error.value();
-            auto json = m_perf_event_buffer->to_json(m_pid, m_executable ? m_executable->absolute_path() : "");
-            if (!json) {
-                dbgln("Error generating perfcore JSON");
-            } else {
-                auto json_buffer = UserOrKernelBuffer::for_kernel_buffer(json->data());
-                auto result = description->write(json_buffer, json->size());
-                if (result.is_error()) {
-                    dbgln("Error while writing perfcore file: {}", result.error().error());
-                }
-            }
-        }
-    }
+    m_threads_for_coredump.clear();
 
     if (m_alarm_timer)
         TimerQueue::the().cancel_timer(m_alarm_timer.release_nonnull());
@@ -646,10 +639,11 @@ void Process::finalize()
     m_cwd = nullptr;
     m_root_directory = nullptr;
     m_root_directory_relative_to_global_root = nullptr;
+    m_arguments.clear();
+    m_environment.clear();
 
     m_dead = true;
 
-    disown_all_shared_buffers();
     {
         // FIXME: PID/TID BUG
         if (auto parent_thread = Thread::from_tid(m_ppid.value())) {
@@ -701,6 +695,11 @@ void Process::die()
     // If the master PTY owner relies on an EOF to know when to wait() on a
     // slave owner, we have to allow the PTY pair to be torn down.
     m_tty = nullptr;
+
+    for_each_thread([&](auto& thread) {
+        m_threads_for_coredump.append(&thread);
+        return IterationDecision::Continue;
+    });
 
     kill_all_threads();
 }
@@ -797,7 +796,7 @@ void Process::terminate_due_to_signal(u8 signal)
     ASSERT_INTERRUPTS_DISABLED();
     ASSERT(signal < 32);
     ASSERT(Process::current() == this);
-    dbg() << "Terminating " << *this << " due to signal " << signal;
+    dbgln("Terminating {} due to signal {}", *this, signal);
     m_termination_status = 0;
     m_termination_signal = signal;
     die();
@@ -922,4 +921,10 @@ void Process::tracer_trap(Thread& thread, const RegisterState& regs)
     thread.send_urgent_signal_to_self(SIGTRAP);
 }
 
+PerformanceEventBuffer& Process::ensure_perf_events()
+{
+    if (!m_perf_event_buffer)
+        m_perf_event_buffer = make<PerformanceEventBuffer>();
+    return *m_perf_event_buffer;
+}
 }

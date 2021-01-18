@@ -62,7 +62,7 @@ public:
         return m_fsid != other.m_fsid || m_index != other.m_index;
     }
 
-    String to_string() const { return String::format("%u:%u", m_fsid, m_index); }
+    String to_string() const { return String::formatted("{}:{}", m_fsid, m_index); }
 
 private:
     u32 m_fsid { 0 };
@@ -76,3 +76,11 @@ inline const LogStream& operator<<(const LogStream& stream, const InodeIdentifie
 }
 
 }
+
+template<>
+struct AK::Formatter<Kernel::InodeIdentifier> : AK::Formatter<FormatString> {
+    void format(FormatBuilder& builder, Kernel::InodeIdentifier value)
+    {
+        return AK::Formatter<FormatString>::format(builder, "{}:{}", value.fsid(), value.index());
+    }
+};

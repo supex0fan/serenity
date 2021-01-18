@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/env python3
 
 import os
 import subprocess
@@ -21,10 +21,10 @@ files = subprocess.run(
         "**/CMake*.txt",
         ":!:Base",
         ":!:Kernel/FileSystem/ext2_fs.h",
-        ":!:Libraries/LibC/getopt.cpp",
-        ":!:Libraries/LibCore/puff.h",
-        ":!:Libraries/LibCore/puff.cpp",
-        ":!:Libraries/LibELF/exec_elf.h"
+        ":!:Userland/Libraries/LibC/getopt.cpp",
+        ":!:Userland/Libraries/LibCore/puff.h",
+        ":!:Userland/Libraries/LibCore/puff.cpp",
+        ":!:Userland/Libraries/LibELF/exec_elf.h"
     ],
     capture_output=True
 ).stdout.decode().strip('\n').split('\n')

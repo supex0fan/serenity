@@ -1,0 +1,21 @@
+endpoint WebContentServer = 89
+{
+    Greet(i32 client_pid) => (i32 client_id, i32 server_pid)
+
+    UpdateSystemTheme(Core::AnonymousBuffer theme_buffer) =|
+
+    LoadURL(URL url) =|
+    LoadHTML(String html, URL url) =|
+
+    AddBackingStore(i32 backing_store_id, Gfx::ShareableBitmap bitmap) =|
+    RemoveBackingStore(i32 backing_store_id) =|
+
+    Paint(Gfx::IntRect content_rect, i32 backing_store_id) =|
+    SetViewportRect(Gfx::IntRect rect) =|
+
+    MouseDown(Gfx::IntPoint position, unsigned button, unsigned buttons, unsigned modifiers) =|
+    MouseMove(Gfx::IntPoint position, unsigned button, unsigned buttons, unsigned modifiers) =|
+    MouseUp(Gfx::IntPoint position, unsigned button, unsigned buttons, unsigned modifiers) =|
+
+    KeyDown(i32 key, unsigned modifiers, u32 code_point) =|
+}

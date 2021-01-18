@@ -27,7 +27,6 @@
 #include <Kernel/FileSystem/Custody.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/Process.h>
-#include <Kernel/SharedBuffer.h>
 #include <Kernel/VM/Region.h>
 
 //#define FORK_DEBUG
@@ -80,8 +79,6 @@ pid_t Process::sys$fork(RegisterState& regs)
     dbgln("fork: child will begin executing at {:04x}:{:08x} with stack {:04x}:{:08x}, kstack {:04x}:{:08x}", child_tss.cs, child_tss.eip, child_tss.ss, child_tss.esp, child_tss.ss0, child_tss.esp0);
 #endif
 
-    SharedBuffer::share_all_shared_buffers(*this, *child);
-
     {
         ScopedSpinLock lock(m_lock);
         for (auto& region : m_regions) {
@@ -90,7 +87,7 @@ pid_t Process::sys$fork(RegisterState& regs)
 #endif
             auto region_clone = region.clone(*child);
             if (!region_clone) {
-                dbg() << "fork: Cannot clone region, insufficient memory";
+                dbgln("fork: Cannot clone region, insufficient memory");
                 // TODO: tear down new process?
                 return -ENOMEM;
             }

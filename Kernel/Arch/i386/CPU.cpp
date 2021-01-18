@@ -31,6 +31,7 @@
 #include <Kernel/Arch/i386/CPU.h>
 #include <Kernel/Arch/i386/ISRStubs.h>
 #include <Kernel/Arch/i386/ProcessorInfo.h>
+#include <Kernel/Arch/i386/SafeMem.h>
 #include <Kernel/IO.h>
 #include <Kernel/Interrupts/APIC.h>
 #include <Kernel/Interrupts/GenericInterruptHandler.h>
@@ -215,168 +216,6 @@ void fpu_exception_handler(TrapFrame*)
     asm volatile("clts");
 }
 
-extern "C" u8* safe_memcpy_ins_1;
-extern "C" u8* safe_memcpy_1_faulted;
-extern "C" u8* safe_memcpy_ins_2;
-extern "C" u8* safe_memcpy_2_faulted;
-extern "C" u8* safe_strnlen_ins;
-extern "C" u8* safe_strnlen_faulted;
-extern "C" u8* safe_memset_ins_1;
-extern "C" u8* safe_memset_1_faulted;
-extern "C" u8* safe_memset_ins_2;
-extern "C" u8* safe_memset_2_faulted;
-
-bool safe_memcpy(void* dest_ptr, const void* src_ptr, size_t n, void*& fault_at)
-{
-    fault_at = nullptr;
-    size_t dest = (size_t)dest_ptr;
-    size_t src = (size_t)src_ptr;
-    size_t remainder;
-    // FIXME: Support starting at an unaligned address.
-    if (!(dest & 0x3) && !(src & 0x3) && n >= 12) {
-        size_t size_ts = n / sizeof(size_t);
-        asm volatile(
-            ".global safe_memcpy_ins_1 \n"
-            "safe_memcpy_ins_1: \n"
-            "rep movsl \n"
-            ".global safe_memcpy_1_faulted \n"
-            "safe_memcpy_1_faulted: \n" // handle_safe_access_fault() set edx to the fault address!
-            : "=S" (src),
-              "=D" (dest),
-              "=c" (remainder),
-              [fault_at] "=d" (fault_at)
-            : "S" (src),
-              "D" (dest),
-              "c" (size_ts)
-            : "memory");
-        if (remainder != 0)
-            return false; // fault_at is already set!
-        n -= size_ts * sizeof(size_t);
-        if (n == 0) {
-            fault_at = nullptr;
-            return true;
-        }
-    }
-    asm volatile(
-        ".global safe_memcpy_ins_2 \n"
-        "safe_memcpy_ins_2: \n"
-        "rep movsb \n"
-        ".global safe_memcpy_2_faulted \n"
-        "safe_memcpy_2_faulted: \n" // handle_safe_access_fault() set edx to the fault address!
-        : "=c" (remainder),
-          [fault_at] "=d" (fault_at)
-        : "S" (src),
-          "D" (dest),
-          "c" (n)
-        : "memory");
-    if (remainder != 0)
-        return false; // fault_at is already set!
-    fault_at = nullptr;
-    return true;
-}
-
-ssize_t safe_strnlen(const char* str, size_t max_n, void*& fault_at)
-{
-    ssize_t count = 0;
-    fault_at = nullptr;
-    asm volatile(
-        "1: \n"
-        "test %[max_n], %[max_n] \n"
-        "je 2f \n"
-        "dec %[max_n] \n"
-        ".global safe_strnlen_ins \n"
-        "safe_strnlen_ins: \n"
-        "cmpb $0,(%[str], %[count], 1) \n"
-        "je 2f \n"
-        "inc %[count] \n"
-        "jmp 1b \n"
-        ".global safe_strnlen_faulted \n"
-        "safe_strnlen_faulted: \n" // handle_safe_access_fault() set edx to the fault address!
-        "xor %[count_on_error], %[count_on_error] \n"
-        "dec %[count_on_error] \n" // return -1 on fault
-        "2:"
-        : [count_on_error] "=c" (count),
-          [fault_at] "=d" (fault_at)
-        : [str] "b" (str),
-          [count] "c" (count),
-          [max_n] "d" (max_n)
-    );
-    if (count >= 0)
-        fault_at = nullptr;
-    return count;
-}
-
-bool safe_memset(void* dest_ptr, int c, size_t n, void*& fault_at)
-{
-    fault_at = nullptr;
-    size_t dest = (size_t)dest_ptr;
-    size_t remainder;
-    // FIXME: Support starting at an unaligned address.
-    if (!(dest & 0x3) && n >= 12) {
-        size_t size_ts = n / sizeof(size_t);
-        size_t expanded_c = (u8)c;
-        expanded_c |= expanded_c << 8;
-        expanded_c |= expanded_c << 16;
-        asm volatile(
-            ".global safe_memset_ins_1 \n"
-            "safe_memset_ins_1: \n"
-            "rep stosl \n"
-            ".global safe_memset_1_faulted \n"
-            "safe_memset_1_faulted: \n" // handle_safe_access_fault() set edx to the fault address!
-            : "=D" (dest),
-              "=c" (remainder),
-              [fault_at] "=d" (fault_at)
-            : "D" (dest),
-              "a" (expanded_c),
-              "c" (size_ts)
-            : "memory");
-        if (remainder != 0)
-            return false; // fault_at is already set!
-        n -= size_ts * sizeof(size_t);
-        if (remainder == 0) {
-            fault_at = nullptr;
-            return true;
-        }
-    }
-    asm volatile(
-        ".global safe_memset_ins_2 \n"
-        "safe_memset_ins_2: \n"
-        "rep stosb \n"
-        ".global safe_memset_2_faulted \n"
-        "safe_memset_2_faulted: \n" // handle_safe_access_fault() set edx to the fault address!
-        : "=D" (dest),
-          "=c" (remainder),
-          [fault_at] "=d" (fault_at)
-        : "D" (dest),
-          "c" (n),
-          "a" (c)
-        : "memory");
-    if (remainder != 0)
-        return false; // fault_at is already set!
-    fault_at = nullptr;
-    return true;
-}
-
-static bool handle_safe_access_fault(RegisterState& regs, u32 fault_address)
-{
-    // If we detect that the fault happened in safe_memcpy() safe_strnlen(),
-    // or safe_memset() then resume at the appropriate _faulted label
-    if (regs.eip == (FlatPtr)&safe_memcpy_ins_1)
-        regs.eip = (FlatPtr)&safe_memcpy_1_faulted;
-    else if (regs.eip == (FlatPtr)&safe_memcpy_ins_2)
-        regs.eip = (FlatPtr)&safe_memcpy_2_faulted;
-    else if (regs.eip == (FlatPtr)&safe_strnlen_ins)
-        regs.eip = (FlatPtr)&safe_strnlen_faulted;
-    else if (regs.eip == (FlatPtr)&safe_memset_ins_1)
-        regs.eip = (FlatPtr)&safe_memset_1_faulted;
-    else if (regs.eip == (FlatPtr)&safe_memset_ins_2)
-        regs.eip = (FlatPtr)&safe_memset_2_faulted;
-    else
-        return false;
-
-    regs.edx = fault_address;
-    return true;
-}
 
 // 14: Page Fault
 EH_ENTRY(14, page_fault);
@@ -419,7 +258,7 @@ void page_fault_handler(TrapFrame* trap)
 
     auto current_thread = Thread::current();
     if (!faulted_in_kernel && !MM.validate_user_stack(current_thread->process(), VirtualAddress(regs.userspace_esp))) {
-        dbg() << "Invalid stack pointer: " << VirtualAddress(regs.userspace_esp);
+        dbgln("Invalid stack pointer: {}", VirtualAddress(regs.userspace_esp));
         handle_crash(regs, "Bad stack on page fault", SIGSTKFLT);
         ASSERT_NOT_REACHED();
     }
@@ -441,11 +280,11 @@ void page_fault_handler(TrapFrame* trap)
             }
         }
 
-        dbg() << "Unrecoverable page fault, "
-              << (regs.exception_code & PageFaultFlags::ReservedBitViolation ? "reserved bit violation / " : "")
-              << (regs.exception_code & PageFaultFlags::InstructionFetch ? "instruction fetch / " : "")
-              << (regs.exception_code & PageFaultFlags::Write ? "write to" : "read from")
-              << " address " << VirtualAddress(fault_address);
+        dbgln("Unrecoverable page fault, {}{}{} address {}",
+            regs.exception_code & PageFaultFlags::ReservedBitViolation ? "reserved bit violation / " : "",
+            regs.exception_code & PageFaultFlags::InstructionFetch ? "instruction fetch / " : "",
+            regs.exception_code & PageFaultFlags::Write ? "write to" : "read from",
+            VirtualAddress(fault_address));
         u32 malloc_scrub_pattern = explode_byte(MALLOC_SCRUB_BYTE);
         u32 free_scrub_pattern = explode_byte(FREE_SCRUB_BYTE);
         u32 kmalloc_scrub_pattern = explode_byte(KMALLOC_SCRUB_BYTE);
@@ -453,25 +292,25 @@ void page_fault_handler(TrapFrame* trap)
         u32 slab_alloc_scrub_pattern = explode_byte(SLAB_ALLOC_SCRUB_BYTE);
         u32 slab_dealloc_scrub_pattern = explode_byte(SLAB_DEALLOC_SCRUB_BYTE);
         if ((fault_address & 0xffff0000) == (malloc_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be uninitialized malloc() memory";
+            dbgln("Note: Address {} looks like it may be uninitialized malloc() memory", VirtualAddress(fault_address));
         } else if ((fault_address & 0xffff0000) == (free_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be recently free()'d memory";
+            dbgln("Note: Address {} looks like it may be recently free()'d memory", VirtualAddress(fault_address));
         } else if ((fault_address & 0xffff0000) == (kmalloc_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be uninitialized kmalloc() memory";
+            dbgln("Note: Address {} looks like it may be uninitialized kmalloc() memory", VirtualAddress(fault_address));
         } else if ((fault_address & 0xffff0000) == (kfree_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be recently kfree()'d memory";
+            dbgln("Note: Address {} looks like it may be recently kfree()'d memory", VirtualAddress(fault_address));
         } else if ((fault_address & 0xffff0000) == (slab_alloc_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be uninitialized slab_alloc() memory";
+            dbgln("Note: Address {} looks like it may be uninitialized slab_alloc() memory", VirtualAddress(fault_address));
         } else if ((fault_address & 0xffff0000) == (slab_dealloc_scrub_pattern & 0xffff0000)) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like it may be recently slab_dealloc()'d memory";
+            dbgln("Note: Address {} looks like it may be recently slab_dealloc()'d memory", VirtualAddress(fault_address));
         } else if (fault_address < 4096) {
-            dbg() << "Note: Address " << VirtualAddress(fault_address) << " looks like a possible nullptr dereference";
+            dbgln("Note: Address {} looks like a possible nullptr dereference", VirtualAddress(fault_address));
         }
 
         handle_crash(regs, "Page Fault", SIGSEGV, response == PageFaultResponse::OutOfMemory);
     } else if (response == PageFaultResponse::Continue) {
 #ifdef PAGE_FAULT_DEBUG
-        dbg() << "Continuing after resolved page fault";
+        dbgln("Continuing after resolved page fault");
 #endif
     } else {
         ASSERT_NOT_REACHED();
@@ -605,7 +444,7 @@ void unregister_generic_interrupt_handler(u8 interrupt_number, GenericInterruptH
 {
     ASSERT(s_interrupt_handler[interrupt_number] != nullptr);
     if (s_interrupt_handler[interrupt_number]->type() == HandlerType::UnhandledInterruptHandler) {
-        dbg() << "Trying to unregister unused handler (?)";
+        dbgln("Trying to unregister unused handler (?)");
         return;
     }
     if (s_interrupt_handler[interrupt_number]->is_shared_handler() && !s_interrupt_handler[interrupt_number]->is_sharing_with_others()) {
@@ -844,7 +683,7 @@ static void idt_init()
     register_interrupt_handler(0xfe, interrupt_254_asm_entry);
     register_interrupt_handler(0xff, interrupt_255_asm_entry);
 
-    dbg() << "Installing Unhandled Handlers";
+    dbgln("Installing Unhandled Handlers");
 
     for (u8 i = 0; i < GENERIC_INTERRUPT_HANDLERS_COUNT; ++i) {
         new UnhandledInterruptHandler(i);
@@ -1362,7 +1201,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
         // until it returns the data back to us
         smp_unicast(thread.cpu(),
             [&]() {
-                dbg() << "CPU[" << Processor::current().id() << "] getting stack for cpu #" << proc.id();
+                dbgln("CPU[{}] getting stack for cpu #{}", Processor::current().id(), proc.id());
                 ProcessPagingScope paging_scope(thread.process());
                 auto& target_proc = Processor::current();
                 ASSERT(&target_proc != &proc);
@@ -1409,7 +1248,7 @@ Vector<FlatPtr> Processor::capture_stack_trace(Thread& thread, size_t max_frames
             break;
         }
         default:
-            dbg() << "Cannot capture stack trace for thread " << thread << " in state " << thread.state_string();
+            dbgln("Cannot capture stack trace for thread {} in state {}", thread, thread.state_string());
             break;
         }
     }

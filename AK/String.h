@@ -30,6 +30,7 @@
 #include <AK/Forward.h>
 #include <AK/RefPtr.h>
 #include <AK/Stream.h>
+#include <AK/StringBuilder.h>
 #include <AK/StringImpl.h>
 #include <AK/StringUtils.h>
 #include <AK/Traits.h>
@@ -58,9 +59,9 @@ namespace AK {
 
 class String {
 public:
-    ~String() { }
+    ~String() = default;
 
-    String() { }
+    String() = default;
     String(const StringView&);
 
     String(const String& other)
@@ -111,6 +112,15 @@ public:
     String(const FlyString&);
 
     static String repeated(char, size_t count);
+
+    template<class SeparatorType, class CollectionType>
+    static String join(const SeparatorType& separator, const CollectionType& collection)
+    {
+        StringBuilder builder;
+        builder.join(separator, collection);
+        return builder.build();
+    }
+
     bool matches(const StringView& mask, CaseSensitivity = CaseSensitivity::CaseInsensitive) const;
     bool matches(const StringView& mask, Vector<MaskSpan>&, CaseSensitivity = CaseSensitivity::CaseInsensitive) const;
 
@@ -138,6 +148,10 @@ public:
 
     Vector<String> split_limit(char separator, size_t limit, bool keep_empty = false) const;
     Vector<String> split(char separator, bool keep_empty = false) const;
+
+    Optional<size_t> find(char) const;
+    Optional<size_t> find(const StringView&) const;
+
     String substring(size_t start) const;
     String substring(size_t start, size_t length) const;
 
@@ -153,7 +167,13 @@ public:
 
     [[nodiscard]] bool copy_characters_to_buffer(char* buffer, size_t buffer_size) const;
 
-    ALWAYS_INLINE ReadonlyBytes bytes() const { return m_impl ? m_impl->bytes() : nullptr; }
+    ALWAYS_INLINE ReadonlyBytes bytes() const
+    {
+        if (m_impl) {
+            return m_impl->bytes();
+        }
+        return {};
+    }
 
     ALWAYS_INLINE const char& operator[](size_t i) const
     {
@@ -244,7 +264,7 @@ public:
         return String((const char*)buffer.data(), buffer.size(), should_chomp);
     }
 
-    static String format(const char*, ...);
+    static String format(const char*, ...) __attribute__((format(printf, 1, 2)));
 
     static String vformatted(StringView fmtstr, TypeErasedFormatParams);
 

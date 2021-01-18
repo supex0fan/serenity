@@ -137,7 +137,7 @@ bool BXVGADevice::set_resolution(size_t width, size_t height)
         return false;
 
     set_resolution_registers(width, height);
-    dbg() << "BXVGADevice resolution set to " << width << "x" << height << " (pitch=" << m_framebuffer_pitch << ")";
+    dbgln("BXVGADevice resolution set to {}x{} (pitch={})", width, height, m_framebuffer_pitch);
 
     m_framebuffer_width = width;
     m_framebuffer_height = height;
@@ -185,7 +185,7 @@ KResultOr<Region*> BXVGADevice::mmap(Process& process, FileDescription&, Virtual
     auto vmobject = AnonymousVMObject::create_for_physical_range(m_framebuffer_address, framebuffer_size_in_bytes());
     if (!vmobject)
         return KResult(-ENOMEM);
-    auto* region = process.allocate_region_with_vmobject(
+    return process.allocate_region_with_vmobject(
         preferred_vaddr,
         framebuffer_size_in_bytes(),
         vmobject.release_nonnull(),
@@ -193,10 +193,6 @@ KResultOr<Region*> BXVGADevice::mmap(Process& process, FileDescription&, Virtual
         "BXVGA Framebuffer",
         prot,
         shared);
-    if (!region)
-        return KResult(-ENOMEM);
-    dbg() << "BXVGADevice: mmap with size " << region->size() << " at " << region->vaddr();
-    return region;
 }
 
 int BXVGADevice::ioctl(FileDescription&, unsigned request, FlatPtr arg)

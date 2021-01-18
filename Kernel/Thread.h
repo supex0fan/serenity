@@ -36,6 +36,7 @@
 #include <AK/WeakPtr.h>
 #include <AK/Weakable.h>
 #include <Kernel/Arch/i386/CPU.h>
+#include <Kernel/Arch/i386/SafeMem.h>
 #include <Kernel/Forward.h>
 #include <Kernel/KResult.h>
 #include <Kernel/LockMode.h>
@@ -101,9 +102,6 @@ public:
 
     void set_priority(u32 p) { m_priority = p; }
     u32 priority() const { return m_priority; }
-
-    void set_priority_boost(u32 boost) { m_priority_boost = boost; }
-    u32 priority_boost() const { return m_priority_boost; }
 
     u32 effective_priority() const;
 
@@ -207,10 +205,6 @@ public:
             : m_infinite(true)
         {
         }
-        BlockTimeout(std::nullptr_t)
-            : m_infinite(true)
-        {
-        }
         explicit BlockTimeout(bool is_absolute, const timeval* time, const timespec* start_time = nullptr, clockid_t clock_id = CLOCK_MONOTONIC_COARSE)
             : m_clock_id(clock_id)
             , m_infinite(!time)
@@ -261,6 +255,7 @@ public:
         enum class Type {
             Unknown = 0,
             File,
+            Futex,
             Plan9FS,
             Join,
             Queue,
@@ -352,6 +347,10 @@ public:
         }
 
         bool set_block_condition(BlockCondition&, void* = nullptr);
+        void set_block_condition_raw_locked(BlockCondition* block_condition)
+        {
+            m_block_condition = block_condition;
+        }
 
         mutable RecursiveSpinLock m_lock;
 
@@ -396,6 +395,12 @@ public:
             });
         }
 
+        bool is_empty() const
+        {
+            ScopedSpinLock lock(m_lock);
+            return is_empty_locked();
+        }
+
     protected:
         template<typename UnblockOne>
         bool unblock(UnblockOne unblock_one)
@@ -423,15 +428,52 @@ public:
             return did_unblock;
         }
 
+        bool is_empty_locked() const
+        {
+            ASSERT(m_lock.is_locked());
+            return m_blockers.is_empty();
+        }
+
         virtual bool should_add_blocker(Blocker&, void*) { return true; }
 
-        SpinLock<u8> m_lock;
-
-    private:
         struct BlockerInfo {
             Blocker* blocker;
             void* data;
         };
+
+        Vector<BlockerInfo, 4> do_take_blockers(size_t count)
+        {
+            if (m_blockers.size() <= count)
+                return move(m_blockers);
+
+            size_t move_count = (count <= m_blockers.size()) ? count : m_blockers.size();
+            ASSERT(move_count > 0);
+
+            Vector<BlockerInfo, 4> taken_blockers;
+            taken_blockers.ensure_capacity(move_count);
+            for (size_t i = 0; i < move_count; i++)
+                taken_blockers.append(m_blockers.take(i));
+            m_blockers.remove(0, move_count);
+            return taken_blockers;
+        }
+
+        void do_append_blockers(Vector<BlockerInfo, 4>&& blockers_to_append)
+        {
+            if (blockers_to_append.is_empty())
+                return;
+            if (m_blockers.is_empty()) {
+                m_blockers = move(blockers_to_append);
+                return;
+            }
+            m_blockers.ensure_capacity(m_blockers.size() + blockers_to_append.size());
+            for (size_t i = 0; i < blockers_to_append.size(); i++)
+                m_blockers.append(blockers_to_append.take(i));
+            blockers_to_append.clear();
+        }
+
+        mutable SpinLock<u8> m_lock;
+
+    private:
         Vector<BlockerInfo, 4> m_blockers;
     };
 
@@ -473,6 +515,39 @@ public:
 
     protected:
         const char* const m_block_reason;
+        bool m_should_block { true };
+        bool m_did_unblock { false };
+    };
+
+    class FutexBlocker : public Blocker {
+    public:
+        explicit FutexBlocker(FutexQueue&, u32);
+        virtual ~FutexBlocker();
+
+        virtual Type blocker_type() const override { return Type::Futex; }
+        virtual const char* state_string() const override { return "Futex"; }
+        virtual void not_blocking(bool) override { }
+
+        virtual bool should_block() override
+        {
+            return m_should_block;
+        }
+
+        u32 bitset() const { return m_bitset; }
+
+        void begin_requeue()
+        {
+            // We need to hold the lock until we moved it over
+            m_relock_flags = m_lock.lock();
+        }
+        void finish_requeue(FutexQueue&);
+
+        bool unblock_bitset(u32 bitset);
+        bool unblock(bool force = false);
+
+    protected:
+        u32 m_bitset;
+        u32 m_relock_flags { 0 };
         bool m_should_block { true };
         bool m_did_unblock { false };
     };
@@ -822,13 +897,13 @@ public:
             scheduler_lock.lock();
             ScopedSpinLock block_lock2(m_block_lock);
             if (should_be_stopped() || state() == Stopped) {
-                dbg() << "Thread should be stopped, current state: " << state_string();
+                dbgln("Thread should be stopped, current state: {}", state_string());
                 set_state(Thread::Blocked);
                 continue;
             }
             if (m_blocker && !m_blocker->can_be_interrupted() && !m_should_die) {
                 block_lock2.unlock();
-                dbg() << "Thread should not be unblocking, current state: " << state_string();
+                dbgln("Thread should not be unblocking, current state: ", state_string());
                 set_state(Thread::Blocked);
                 continue;
             }
@@ -1203,7 +1278,6 @@ private:
     String m_name;
     u32 m_priority { THREAD_PRIORITY_NORMAL };
     u32 m_extra_priority { 0 };
-    u32 m_priority_boost { 0 };
 
     State m_stop_state { Invalid };
 
@@ -1311,3 +1385,8 @@ inline IterationDecision Scheduler::for_each_nonrunnable(Callback callback)
 }
 
 }
+
+template<>
+struct AK::Formatter<Kernel::Thread> : AK::Formatter<FormatString> {
+    void format(FormatBuilder&, const Kernel::Thread&);
+};

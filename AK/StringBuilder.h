@@ -39,14 +39,14 @@ public:
     using OutputType = String;
 
     explicit StringBuilder(size_t initial_capacity = inline_capacity);
-    ~StringBuilder() { }
+    ~StringBuilder() = default;
 
     void append(const StringView&);
     void append(const Utf32View&);
     void append(char);
     void append_code_point(u32);
     void append(const char*, size_t);
-    void appendf(const char*, ...);
+    void appendf(const char*, ...) __attribute__((format(printf, 2, 3)));
     void appendvf(const char*, va_list);
 
     void append_escaped_for_json(const StringView&);

@@ -37,7 +37,7 @@ namespace AK {
 
 class StringView {
 public:
-    ALWAYS_INLINE constexpr StringView() { }
+    ALWAYS_INLINE constexpr StringView() = default;
     ALWAYS_INLINE constexpr StringView(const char* characters, size_t length)
         : m_characters(characters)
         , m_length(length)
@@ -99,6 +99,9 @@ public:
 
     Optional<size_t> find_last_of(char) const;
     Optional<size_t> find_last_of(const StringView&) const;
+
+    Optional<size_t> find(const StringView&) const;
+    Optional<size_t> find(char c) const;
 
     StringView substring_view(size_t start, size_t length) const;
     StringView substring_view(size_t start) const;

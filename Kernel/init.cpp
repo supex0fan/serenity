@@ -39,7 +39,7 @@
 #include <Kernel/Devices/RandomDevice.h>
 #include <Kernel/Devices/SB16.h>
 #include <Kernel/Devices/SerialDevice.h>
-#include <Kernel/Devices/UHCIController.h>
+#include <Kernel/Devices/USB/UHCIController.h>
 #include <Kernel/Devices/VMWareBackdoor.h>
 #include <Kernel/Devices/ZeroDevice.h>
 #include <Kernel/FileSystem/Ext2FileSystem.h>
@@ -223,7 +223,7 @@ void init_stage2(void*)
     bool text_mode = kernel_command_line().lookup("boot_mode").value_or("graphical") == "text";
 
     if (text_mode) {
-        dbg() << "Text mode enabled";
+        dbgln("Text mode enabled");
     } else {
         bool bxvga_found = false;
         PCI::enumerate([&](const PCI::Address&, PCI::ID id) {
@@ -246,7 +246,7 @@ void init_stage2(void*)
         }
     }
 
-    UHCIController::detect();
+    USB::UHCIController::detect();
 
     E1000NetworkAdapter::detect();
     RTL8139NetworkAdapter::detect();
@@ -300,7 +300,7 @@ void init_stage2(void*)
 
 void setup_serial_debug()
 {
-    // serial_debug will output all the klog() and dbg() data to COM1 at
+    // serial_debug will output all the klog() and dbgln() data to COM1 at
     // 8-N-1 57600 baud. this is particularly useful for debugging the boot
     // process on live hardware.
     //

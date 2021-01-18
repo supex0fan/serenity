@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2020, Jesse Buhagiar <jooster669@gmail.com>
  * Copyright (c) 2020, Itamar S. <itamar8910@gmail.com>
+ * Copyright (c) 2020-2021, Linus Groh <mail@linusgroh.de>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,6 +27,7 @@
  */
 
 #include <AK/ByteBuffer.h>
+#include <AK/JsonArray.h>
 #include <AK/JsonObject.h>
 #include <Kernel/CoreDump.h>
 #include <Kernel/FileSystem/Custody.h>
@@ -45,12 +47,12 @@ OwnPtr<CoreDump> CoreDump::create(NonnullRefPtr<Process> process, const String& 
 {
     if (!process->is_dumpable()) {
         dbgln("Refusing to generate CoreDump for non-dumpable process {}", process->pid().value());
-        return nullptr;
+        return {};
     }
 
     auto fd = create_target_file(process, output_path);
     if (!fd)
-        return nullptr;
+        return {};
     return adopt_own(*new CoreDump(move(process), fd.release_nonnull()));
 }
 
@@ -69,23 +71,27 @@ RefPtr<FileDescription> CoreDump::create_target_file(const Process& process, con
 {
     LexicalPath lexical_path(output_path);
     auto output_directory = lexical_path.dirname();
-    if (VFS::the().open_directory(output_directory, VFS::the().root_custody()).is_error()) {
-        auto res = VFS::the().mkdir(output_directory, 0777, VFS::the().root_custody());
-        if (res.is_error())
-            return nullptr;
-    }
-    auto tmp_dir = VFS::the().open_directory(output_directory, VFS::the().root_custody());
-    if (tmp_dir.is_error())
+    auto dump_directory = VFS::the().open_directory(output_directory, VFS::the().root_custody());
+    if (dump_directory.is_error()) {
+        dbgln("Can't find directory '{}' for core dump", output_directory);
         return nullptr;
+    }
+    auto dump_directory_metadata = dump_directory.value()->inode().metadata();
+    if (dump_directory_metadata.uid != 0 || dump_directory_metadata.gid != 0 || dump_directory_metadata.mode != 040755) {
+        dbgln("Refusing to put core dump in sketchy directory '{}'", output_directory);
+        return nullptr;
+    }
     auto fd_or_error = VFS::the().open(
         lexical_path.basename(),
         O_CREAT | O_WRONLY | O_EXCL,
         0, // We will enable reading from userspace when we finish generating the coredump file
-        *tmp_dir.value(),
+        *dump_directory.value(),
         UidAndGid { process.uid(), process.gid() });
 
-    if (fd_or_error.is_error())
+    if (fd_or_error.is_error()) {
+        dbgln("Failed to open core dump '{}' for writing", output_path);
         return nullptr;
+    }
 
     return fd_or_error.value();
 }
@@ -215,15 +221,17 @@ ByteBuffer CoreDump::create_notes_process_data() const
 
     ELF::Core::ProcessInfo info {};
     info.header.type = ELF::Core::NotesEntryHeader::Type::ProcessInfo;
-    info.pid = m_process->pid().value();
-    info.termination_signal = m_process->termination_signal();
-
     process_data.append((void*)&info, sizeof(info));
 
-    auto executable_path = String::empty();
-    if (auto executable = m_process->executable())
-        executable_path = executable->absolute_path();
-    process_data.append(executable_path.characters(), executable_path.length() + 1);
+    JsonObject process_obj;
+    process_obj.set("pid", m_process->pid().value());
+    process_obj.set("termination_signal", m_process->termination_signal());
+    process_obj.set("executable_path", m_process->executable() ? m_process->executable()->absolute_path() : String::empty());
+    process_obj.set("arguments", JsonArray(m_process->arguments()));
+    process_obj.set("environment", JsonArray(m_process->environment()));
+
+    auto json_data = process_obj.to_string();
+    process_data.append(json_data.characters(), json_data.length() + 1);
 
     return process_data;
 }

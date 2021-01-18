@@ -230,6 +230,12 @@ NonnullRefPtr<FIFO> Inode::fifo()
 void Inode::set_metadata_dirty(bool metadata_dirty)
 {
     LOCKER(m_lock);
+
+    if (metadata_dirty) {
+        // Sanity check.
+        ASSERT(!fs().is_readonly());
+    }
+
     if (m_metadata_dirty == metadata_dirty)
         return;
 
@@ -268,7 +274,7 @@ KResult Inode::prepare_to_write_data()
         return KResult(-EROFS);
     auto metadata = this->metadata();
     if (metadata.is_setuid() || metadata.is_setgid()) {
-        dbg() << "Inode::prepare_to_write_data(): Stripping SUID/SGID bits from " << identifier();
+        dbgln("Inode::prepare_to_write_data(): Stripping SUID/SGID bits from {}", identifier());
         return chmod(metadata.mode & ~(04000 | 02000));
     }
     return KSuccess;

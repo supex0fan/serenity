@@ -118,7 +118,7 @@ void PS2MouseDevice::irq_handle_byte_read(u8 byte)
     switch (m_data_state) {
     case 0:
         if (!(byte & 0x08)) {
-            dbg() << "PS2Mouse: Stream out of sync.";
+            dbgln("PS2Mouse: Stream out of sync.");
             break;
         }
         ++m_data_state;
@@ -181,8 +181,8 @@ MousePacket PS2MouseDevice::parse_data_packet(const RawPacket& raw_packet)
 
     packet.is_relative = true;
 #ifdef PS2MOUSE_DEBUG
-    dbg() << "PS2 Relative Mouse: Buttons " << String::format("%x", packet.buttons);
-    dbg() << "Mouse: X " << packet.x << ", Y " << packet.y << ", Z " << packet.z;
+    dbgln("PS2 Relative Mouse: Buttons {:x}", packet.buttons);
+    dbgln("Mouse: X {}, Y {}, Z {}", packet.x, packet.y, packet.z);
 #endif
     return packet;
 }
@@ -203,7 +203,7 @@ u8 PS2MouseDevice::send_command(u8 command)
 {
     u8 response = m_controller.send_command(I8042Controller::Device::Mouse, command);
     if (response != I8042_ACK)
-        dbg() << "PS2MouseDevice: Command " << (int)command << " got " << (int)response << " but expected ack: " << (int)I8042_ACK;
+        dbgln("PS2MouseDevice: Command {} got {} but expected ack: {}", command, response, I8042_ACK);
     return response;
 }
 
@@ -211,7 +211,7 @@ u8 PS2MouseDevice::send_command(u8 command, u8 data)
 {
     u8 response = m_controller.send_command(I8042Controller::Device::Mouse, command, data);
     if (response != I8042_ACK)
-        dbg() << "PS2MouseDevice: Command " << (int)command << " got " << (int)response << " but expected ack: " << (int)I8042_ACK;
+        dbgln("PS2MouseDevice: Command {} got {} but expected ack: {}", command, response, I8042_ACK);
     return response;
 }
 
@@ -223,7 +223,7 @@ void PS2MouseDevice::set_sample_rate(u8 rate)
 bool PS2MouseDevice::initialize()
 {
     if (!m_controller.reset_device(I8042Controller::Device::Mouse)) {
-        dbg() << "PS2MouseDevice: I8042 controller failed to reset device";
+        dbgln("PS2MouseDevice: I8042 controller failed to reset device");
         return false;
     }
 
@@ -282,9 +282,9 @@ KResultOr<size_t> PS2MouseDevice::read(FileDescription&, size_t, UserOrKernelBuf
         lock.unlock();
 
 #ifdef PS2MOUSE_DEBUG
-        dbg() << "PS2 Mouse Read: Buttons " << String::format("%x", packet.buttons);
-        dbg() << "PS2 Mouse: X " << packet.x << ", Y " << packet.y << ", Z " << packet.z << " Relative " << packet.buttons;
-        dbg() << "PS2 Mouse Read: Filter packets";
+        dbgln("PS2 Mouse Read: Buttons {:x}", packet.buttons);
+        dbgln("PS2 Mouse: X {}, Y {}, Z {}, Relative {}", packet.x, packet.y, packet.z, packet.buttons);
+        dbgln("PS2 Mouse Read: Filter packets");
 #endif
         size_t bytes_read_from_packet = min(remaining_space_in_buffer, sizeof(MousePacket));
         if (!buffer.write(&packet, nread, bytes_read_from_packet))

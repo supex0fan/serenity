@@ -38,6 +38,7 @@
 #include <Kernel/API/Syscall.h>
 #include <Kernel/FileSystem/InodeMetadata.h>
 #include <Kernel/Forward.h>
+#include <Kernel/FutexQueue.h>
 #include <Kernel/Lock.h>
 #include <Kernel/ProcessGroup.h>
 #include <Kernel/StdLib.h>
@@ -48,6 +49,7 @@
 #include <Kernel/VM/AllocationStrategy.h>
 #include <Kernel/VM/RangeAllocator.h>
 #include <LibC/signal_numbers.h>
+#include <Libraries/LibELF/exec_elf.h>
 
 namespace Kernel {
 
@@ -65,6 +67,7 @@ extern VirtualAddress g_return_to_ring3_from_signal_trampoline;
     __ENUMERATE_PLEDGE_PROMISE(inet)      \
     __ENUMERATE_PLEDGE_PROMISE(id)        \
     __ENUMERATE_PLEDGE_PROMISE(proc)      \
+    __ENUMERATE_PLEDGE_PROMISE(ptrace)    \
     __ENUMERATE_PLEDGE_PROMISE(exec)      \
     __ENUMERATE_PLEDGE_PROMISE(unix)      \
     __ENUMERATE_PLEDGE_PROMISE(recvfd)    \
@@ -78,8 +81,7 @@ extern VirtualAddress g_return_to_ring3_from_signal_trampoline;
     __ENUMERATE_PLEDGE_PROMISE(accept)    \
     __ENUMERATE_PLEDGE_PROMISE(settime)   \
     __ENUMERATE_PLEDGE_PROMISE(sigaction) \
-    __ENUMERATE_PLEDGE_PROMISE(setkeymap) \
-    __ENUMERATE_PLEDGE_PROMISE(shared_buffer)
+    __ENUMERATE_PLEDGE_PROMISE(setkeymap)
 
 enum class Pledge : u32 {
 #define __ENUMERATE_PLEDGE_PROMISE(x) x,
@@ -92,6 +94,8 @@ enum class VeilState {
     Dropped,
     Locked,
 };
+
+typedef HashMap<FlatPtr, RefPtr<FutexQueue>> FutexQueues;
 
 class Process
     : public RefCounted<Process>
@@ -257,12 +261,11 @@ public:
     int sys$set_mmap_name(Userspace<const Syscall::SC_set_mmap_name_params*>);
     int sys$mprotect(void*, size_t, int prot);
     int sys$madvise(void*, size_t, int advice);
-    int sys$minherit(void*, size_t, int inherit);
     int sys$purge(int mode);
     int sys$select(const Syscall::SC_select_params*);
     int sys$poll(Userspace<const Syscall::SC_poll_params*>);
     ssize_t sys$get_dir_entries(int fd, void*, ssize_t);
-    int sys$getcwd(Userspace<char*>, ssize_t);
+    int sys$getcwd(Userspace<char*>, size_t);
     int sys$chdir(Userspace<const char*>, size_t);
     int sys$fchdir(int fd);
     int sys$sleep(unsigned seconds);
@@ -333,13 +336,6 @@ public:
     int sys$get_thread_name(pid_t tid, Userspace<char*> buffer, size_t buffer_size);
     int sys$rename(Userspace<const Syscall::SC_rename_params*>);
     int sys$mknod(Userspace<const Syscall::SC_mknod_params*>);
-    int sys$shbuf_create(int, void** buffer);
-    int sys$shbuf_allow_pid(int, pid_t peer_pid);
-    int sys$shbuf_allow_all(int);
-    void* sys$shbuf_get(int shbuf_id, Userspace<size_t*> size);
-    int sys$shbuf_release(int shbuf_id);
-    int sys$shbuf_seal(int shbuf_id);
-    int sys$shbuf_set_volatile(int shbuf_id, bool);
     int sys$halt();
     int sys$reboot();
     int sys$realpath(Userspace<const Syscall::SC_realpath_params*>);
@@ -350,8 +346,6 @@ public:
     int sys$profiling_enable(pid_t);
     int sys$profiling_disable(pid_t);
     int sys$futex(Userspace<const Syscall::SC_futex_params*>);
-    int sys$set_thread_boost(pid_t tid, int amount);
-    int sys$set_process_boost(pid_t, int amount);
     int sys$chroot(Userspace<const char*> path, size_t path_length, int mount_flags);
     int sys$pledge(Userspace<const Syscall::SC_pledge_params*>);
     int sys$unveil(Userspace<const Syscall::SC_unveil_params*>);
@@ -366,6 +360,7 @@ public:
     int sys$prctl(int option, FlatPtr arg1, FlatPtr arg2);
     int sys$set_coredump_metadata(Userspace<const Syscall::SC_set_coredump_metadata_params*>);
     void sys$abort();
+    int sys$anon_create(size_t, int options);
 
     template<bool sockname, typename Params>
     int get_sock_or_peer_name(const Params&);
@@ -396,6 +391,9 @@ public:
     Custody& current_directory();
     Custody* executable() { return m_executable.ptr(); }
     const Custody* executable() const { return m_executable.ptr(); }
+
+    const Vector<String>& arguments() const { return m_arguments; };
+    const Vector<String>& environment() const { return m_environment; };
 
     int number_of_open_file_descriptors() const;
     int max_open_file_descriptors() const
@@ -430,18 +428,19 @@ public:
         Yes,
     };
 
-    KResultOr<LoadResult> load(NonnullRefPtr<FileDescription> main_program_description, RefPtr<FileDescription> interpreter_description, bool is_dynamic);
+    KResultOr<LoadResult> load(NonnullRefPtr<FileDescription> main_program_description, RefPtr<FileDescription> interpreter_description, const Elf32_Ehdr& main_program_header);
     KResultOr<LoadResult> load_elf_object(FileDescription& object_description, FlatPtr load_offset, ShouldAllocateTls);
+    KResultOr<FlatPtr> get_interpreter_load_offset(const Elf32_Ehdr& main_program_header, FileDescription& main_program_description, FileDescription& interpreter_description);
 
     bool is_superuser() const
     {
         return m_euid == 0;
     }
 
-    Region* allocate_region_with_vmobject(VirtualAddress, size_t, NonnullRefPtr<VMObject>, size_t offset_in_vmobject, const String& name, int prot, bool shared);
-    Region* allocate_region(VirtualAddress, size_t, const String& name, int prot = PROT_READ | PROT_WRITE, AllocationStrategy strategy = AllocationStrategy::Reserve);
-    Region* allocate_region_with_vmobject(const Range&, NonnullRefPtr<VMObject>, size_t offset_in_vmobject, const String& name, int prot, bool shared);
-    Region* allocate_region(const Range&, const String& name, int prot = PROT_READ | PROT_WRITE, AllocationStrategy strategy = AllocationStrategy::Reserve);
+    KResultOr<Region*> allocate_region_with_vmobject(VirtualAddress, size_t, NonnullRefPtr<VMObject>, size_t offset_in_vmobject, const String& name, int prot, bool shared);
+    KResultOr<Region*> allocate_region(VirtualAddress, size_t, const String& name, int prot = PROT_READ | PROT_WRITE, AllocationStrategy strategy = AllocationStrategy::Reserve);
+    KResultOr<Region*> allocate_region_with_vmobject(const Range&, NonnullRefPtr<VMObject>, size_t offset_in_vmobject, const String& name, int prot, bool shared);
+    KResultOr<Region*> allocate_region(const Range&, const String& name, int prot = PROT_READ | PROT_WRITE, AllocationStrategy strategy = AllocationStrategy::Reserve);
     bool deallocate_region(Region& region);
 
     Region& allocate_split_region(const Region& source_region, const Range&, size_t offset_in_vmobject);
@@ -460,11 +459,6 @@ public:
     Lock& big_lock()
     {
         return m_big_lock;
-    }
-
-    u32 priority_boost() const
-    {
-        return m_priority_boost;
     }
 
     Custody& root_directory();
@@ -507,10 +501,14 @@ public:
 
     const HashMap<String, String>& coredump_metadata() const { return m_coredump_metadata; }
 
+    PerformanceEventBuffer* perf_events() { return m_perf_event_buffer; }
+
 private:
     friend class MemoryManager;
     friend class Scheduler;
     friend class Region;
+
+    PerformanceEventBuffer& ensure_perf_events();
 
     Process(RefPtr<Thread>& first_thread, const String& name, uid_t, gid_t, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> cwd = nullptr, RefPtr<Custody> executable = nullptr, TTY* = nullptr, Process* fork_parent = nullptr);
     static ProcessID allocate_pid();
@@ -521,14 +519,15 @@ private:
 
     void kill_threads_except_self();
     void kill_all_threads();
+    bool dump_core();
+    bool dump_perfcore();
 
-    int do_exec(NonnullRefPtr<FileDescription> main_program_description, Vector<String> arguments, Vector<String> environment, RefPtr<FileDescription> interpreter_description, Thread*& new_main_thread, u32& prev_flags, bool is_dynamic);
+    int do_exec(NonnullRefPtr<FileDescription> main_program_description, Vector<String> arguments, Vector<String> environment, RefPtr<FileDescription> interpreter_description, Thread*& new_main_thread, u32& prev_flags, const Elf32_Ehdr& main_program_header);
     ssize_t do_write(FileDescription&, const UserOrKernelBuffer&, size_t);
 
-    KResultOr<RefPtr<FileDescription>> find_elf_interpreter_for_executable(const String& path, char (&first_page)[PAGE_SIZE], int nread, size_t file_size);
+    KResultOr<RefPtr<FileDescription>> find_elf_interpreter_for_executable(const String& path, const Elf32_Ehdr& elf_header, int nread, size_t file_size);
 
     int alloc_fd(int first_candidate_fd = 0);
-    void disown_all_shared_buffers();
 
     KResult do_kill(Process&, int signal);
     KResult do_killpg(ProcessGroupID pgrp, int signal);
@@ -545,6 +544,8 @@ private:
     KResultOr<String> get_syscall_path_argument(const Syscall::StringArgument&) const;
 
     bool has_tracee_thread(ProcessID tracer_pid);
+
+    void clear_futex_queues_on_exec();
 
     RefPtr<PageDirectory> m_page_directory;
 
@@ -604,6 +605,9 @@ private:
     RefPtr<Custody> m_root_directory;
     RefPtr<Custody> m_root_directory_relative_to_global_root;
 
+    Vector<String> m_arguments;
+    Vector<String> m_environment;
+
     RefPtr<TTY> m_tty;
 
     Region* find_region_from_range(const Range&);
@@ -632,18 +636,16 @@ private:
 
     RefPtr<Timer> m_alarm_timer;
 
-    u32 m_priority_boost { 0 };
-
     u32 m_promises { 0 };
     u32 m_execpromises { 0 };
 
     VeilState m_veil_state { VeilState::None };
     UnveilNode m_unveiled_paths { "/", { .full_path = "/", .unveil_inherited_from_root = true } };
 
-    WaitQueue& futex_queue(Userspace<const i32*>);
-    HashMap<u32, OwnPtr<WaitQueue>> m_futex_queues;
-
     OwnPtr<PerformanceEventBuffer> m_perf_event_buffer;
+
+    FutexQueues m_futex_queues;
+    SpinLock<u8> m_futex_lock;
 
     // This member is used in the implementation of ptrace's PT_TRACEME flag.
     // If it is set to true, the process will stop at the next execve syscall
@@ -653,6 +655,8 @@ private:
     Thread::WaitBlockCondition m_wait_block_condition;
 
     HashMap<String, String> m_coredump_metadata;
+
+    Vector<RefPtr<Thread>> m_threads_for_coredump;
 };
 
 extern InlineLinkedList<Process>* g_processes;
@@ -755,13 +759,13 @@ inline const LogStream& operator<<(const LogStream& stream, const Process& proce
 
 inline u32 Thread::effective_priority() const
 {
-    return m_priority + m_process->priority_boost() + m_priority_boost + m_extra_priority;
+    return m_priority + m_extra_priority;
 }
 
 #define REQUIRE_NO_PROMISES                        \
     do {                                           \
         if (Process::current()->has_promises()) {  \
-            dbg() << "Has made a promise";         \
+            dbgln("Has made a promise");           \
             cli();                                 \
             Process::current()->crash(SIGABRT, 0); \
             ASSERT_NOT_REACHED();                  \
@@ -772,7 +776,7 @@ inline u32 Thread::effective_priority() const
     do {                                                             \
         if (Process::current()->has_promises()                       \
             && !Process::current()->has_promised(Pledge::promise)) { \
-            dbg() << "Has not pledged " << #promise;                 \
+            dbgln("Has not pledged {}", #promise);                   \
             cli();                                                   \
             Process::current()->crash(SIGABRT, 0);                   \
             ASSERT_NOT_REACHED();                                    \
@@ -785,3 +789,11 @@ inline static String copy_string_from_user(const Kernel::Syscall::StringArgument
 {
     return copy_string_from_user(string.characters, string.length);
 }
+
+template<>
+struct AK::Formatter<Kernel::Process> : AK::Formatter<String> {
+    void format(FormatBuilder& builder, const Kernel::Process& value)
+    {
+        return AK::Formatter<String>::format(builder, String::formatted("{}({})", value.name(), value.pid().value()));
+    }
+};

@@ -45,6 +45,13 @@ VMObject::VMObject(size_t size)
 
 VMObject::~VMObject()
 {
+    {
+        ScopedSpinLock lock(m_on_deleted_lock);
+        for (auto& it : m_on_deleted)
+            it->vmobject_deleted(*this);
+        m_on_deleted.clear();
+    }
+
     MM.unregister_vmobject(*this);
     ASSERT(m_regions_count.load(AK::MemoryOrder::memory_order_relaxed) == 0);
 }

@@ -266,7 +266,7 @@ struct StandardFormatter {
 
 template<typename T>
 struct Formatter<T, typename EnableIf<IsIntegral<T>::value>::Type> : StandardFormatter {
-    Formatter() { }
+    Formatter() = default;
     explicit Formatter(StandardFormatter formatter)
         : StandardFormatter(formatter)
     {
@@ -277,7 +277,7 @@ struct Formatter<T, typename EnableIf<IsIntegral<T>::value>::Type> : StandardFor
 
 template<>
 struct Formatter<StringView> : StandardFormatter {
-    Formatter() { }
+    Formatter() = default;
     explicit Formatter(StandardFormatter formatter)
         : StandardFormatter(formatter)
     {
@@ -338,7 +338,7 @@ struct Formatter<float> : StandardFormatter {
 };
 template<>
 struct Formatter<double> : StandardFormatter {
-    Formatter() { }
+    Formatter() = default;
     explicit Formatter(StandardFormatter formatter)
         : StandardFormatter(formatter)
     {
@@ -359,7 +359,7 @@ struct Formatter<std::nullptr_t> : Formatter<FlatPtr> {
     }
 };
 
-void vformat(StringBuilder& builder, StringView fmtstr, TypeErasedFormatParams);
+void vformat(StringBuilder&, StringView fmtstr, TypeErasedFormatParams);
 void vformat(const LogStream& stream, StringView fmtstr, TypeErasedFormatParams);
 
 #ifndef KERNEL
@@ -392,10 +392,16 @@ inline void warnln() { outln(stderr); }
 
 void vdbgln(StringView fmtstr, TypeErasedFormatParams);
 
-template<typename... Parameters>
-void dbgln(StringView fmtstr, const Parameters&... parameters) { vdbgln(fmtstr, VariadicFormatParams { parameters... }); }
-template<typename... Parameters>
-void dbgln(const char* fmtstr, const Parameters&... parameters) { dbgln(StringView { fmtstr }, parameters...); }
+template<bool enabled = true, typename... Parameters>
+void dbgln(StringView fmtstr, const Parameters&... parameters)
+{
+    if constexpr (enabled)
+        vdbgln(fmtstr, VariadicFormatParams { parameters... });
+}
+template<bool enabled = true, typename... Parameters>
+void dbgln(const char* fmtstr, const Parameters&... parameters) { dbgln<enabled>(StringView { fmtstr }, parameters...); }
+template<bool enabled = true>
+void dbgln() { dbgln<enabled>(""); }
 
 template<typename T, typename = void>
 struct HasFormatter : TrueType {
@@ -435,6 +441,20 @@ template<typename T>
 struct Formatter<FormatIfSupported<T>> : __FormatIfSupported<T, HasFormatter<T>::value> {
 };
 
+// This is a helper class, the idea is that if you want to implement a formatter you can inherit
+// from this class to "break down" the formatting.
+struct FormatString {
+};
+template<>
+struct Formatter<FormatString> : Formatter<String> {
+    template<typename... Parameters>
+    void format(FormatBuilder& builder, StringView fmtstr, const Parameters&... parameters)
+    {
+        vformat(builder, fmtstr, VariadicFormatParams { parameters... });
+    }
+    void vformat(FormatBuilder& builder, StringView fmtstr, TypeErasedFormatParams params);
+};
+
 } // namespace AK
 
 #ifndef KERNEL
@@ -448,3 +468,4 @@ using AK::warnln;
 using AK::dbgln;
 
 using AK::FormatIfSupported;
+using AK::FormatString;

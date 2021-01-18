@@ -38,7 +38,6 @@ class JsonArray;
 class JsonObject;
 class JsonValue;
 class LogStream;
-class SharedBuffer;
 class StackInfo;
 class String;
 class StringBuilder;
@@ -133,15 +132,6 @@ class WeakPtr;
 template<typename T, size_t inline_capacity = 0>
 class Vector;
 
-template<typename... Parameters>
-void dbgln(const char* fmtstr, const Parameters&...);
-
-template<typename... Parameters>
-void warnln(const char* fmtstr, const Parameters&...);
-
-template<typename... Parameters>
-void outln(const char* fmtstr, const Parameters&...);
-
 }
 
 using AK::Array;
@@ -178,7 +168,6 @@ using AK::OutputStream;
 using AK::OwnPtr;
 using AK::ReadonlyBytes;
 using AK::RefPtr;
-using AK::SharedBuffer;
 using AK::SinglyLinkedList;
 using AK::Span;
 using AK::StackInfo;

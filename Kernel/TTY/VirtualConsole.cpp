@@ -70,7 +70,7 @@ VirtualConsole::VirtualConsole(const unsigned index)
 {
     ASSERT(index < s_max_virtual_consoles);
 
-    m_tty_name = String::format("/dev/tty%u", m_index);
+    m_tty_name = String::formatted("/dev/tty{}", m_index);
     m_terminal.set_size(80, 25);
 
     s_consoles[index] = this;
@@ -95,12 +95,12 @@ void VirtualConsole::switch_to(unsigned index)
         // can set the video mode on our own. Just stop anyone from trying for
         // now.
         if (active_console->is_graphical()) {
-            dbg() << "Cannot switch away from graphical console yet :(";
+            dbgln("Cannot switch away from graphical console yet :(");
             return;
         }
         active_console->set_active(false);
     }
-    dbg() << "VC: Switch to " << index << " (" << s_consoles[index] << ")";
+    dbgln("VC: Switch to {} ({})", index, s_consoles[index]);
     s_active_console = index;
     s_consoles[s_active_console]->set_active(true);
 }
@@ -238,7 +238,9 @@ void VirtualConsole::on_key_pressed(KeyboardDevice::Event event)
         return;
     }
 
-    m_terminal.handle_key_press(event.key, event.code_point, event.flags);
+    Processor::deferred_call_queue([this, event]() {
+        m_terminal.handle_key_press(event.key, event.code_point, event.flags);
+    });
 }
 
 ssize_t VirtualConsole::on_tty_write(const UserOrKernelBuffer& data, ssize_t size)
@@ -274,11 +276,11 @@ static inline u8 attribute_to_vga(const VT::Attribute& attribute)
 
     // Background color
     vga_attr &= ~0x70;
-    vga_attr |= xterm_color_to_vga(attribute.background_color) << 8;
+    vga_attr |= xterm_color_to_vga(attribute.effective_background_color()) << 8;
 
     // Foreground color
     vga_attr &= ~0x7;
-    vga_attr |= xterm_color_to_vga(attribute.foreground_color);
+    vga_attr |= xterm_color_to_vga(attribute.effective_foreground_color());
 
     return vga_attr;
 }
@@ -305,7 +307,7 @@ void VirtualConsole::flush_dirty_lines()
 void VirtualConsole::beep()
 {
     // TODO
-    dbg() << "Beep!1";
+    dbgln("Beep!1");
 }
 
 void VirtualConsole::set_window_title(const StringView&)

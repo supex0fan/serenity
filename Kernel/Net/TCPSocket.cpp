@@ -400,7 +400,7 @@ KResult TCPSocket::protocol_connect(FileDescription& description, ShouldBlock sh
     if (should_block == ShouldBlock::Yes) {
         locker.unlock();
         auto unblock_flags = Thread::FileBlocker::BlockFlags::None;
-        if (Thread::current()->block<Thread::ConnectBlocker>(nullptr, description, unblock_flags).was_interrupted())
+        if (Thread::current()->block<Thread::ConnectBlocker>({}, description, unblock_flags).was_interrupted())
             return KResult(-EINTR);
         locker.lock();
         ASSERT(setup_state() == SetupState::Completed);
@@ -460,12 +460,12 @@ void TCPSocket::shut_down_for_writing()
 {
     if (state() == State::Established) {
 #ifdef TCP_SOCKET_DEBUG
-        dbg() << " Sending FIN/ACK from Established and moving into FinWait1";
+        dbgln(" Sending FIN/ACK from Established and moving into FinWait1");
 #endif
         [[maybe_unused]] auto rc = send_tcp_packet(TCPFlags::FIN | TCPFlags::ACK);
         set_state(State::FinWait1);
     } else {
-        dbg() << " Shutting down TCPSocket for writing but not moving to FinWait1 since state is " << to_string(state());
+        dbgln(" Shutting down TCPSocket for writing but not moving to FinWait1 since state is {}", to_string(state()));
     }
 }
 
@@ -475,7 +475,7 @@ KResult TCPSocket::close()
     auto result = IPv4Socket::close();
     if (state() == State::CloseWait) {
 #ifdef TCP_SOCKET_DEBUG
-        dbg() << " Sending FIN from CloseWait and moving into LastAck";
+        dbgln(" Sending FIN from CloseWait and moving into LastAck");
 #endif
         [[maybe_unused]] auto rc = send_tcp_packet(TCPFlags::FIN | TCPFlags::ACK);
         set_state(State::LastAck);

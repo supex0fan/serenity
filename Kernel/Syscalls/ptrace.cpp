@@ -37,7 +37,7 @@ namespace Kernel {
 
 int Process::sys$ptrace(Userspace<const Syscall::SC_ptrace_params*> user_params)
 {
-    REQUIRE_PROMISE(proc);
+    REQUIRE_PROMISE(ptrace);
     Syscall::SC_ptrace_params params;
     if (!copy_from_user(&params, user_params))
         return -EFAULT;
@@ -63,7 +63,7 @@ KResultOr<u32> Process::peek_user_data(Userspace<const u32*> address)
     // process that called PT_PEEK
     ProcessPagingScope scope(*this);
     if (!copy_from_user(&result, address)) {
-        dbg() << "Invalid address for peek_user_data: " << address.ptr();
+        dbgln("Invalid address for peek_user_data: {}", address.ptr());
         return KResult(-EFAULT);
     }
 
@@ -72,11 +72,11 @@ KResultOr<u32> Process::peek_user_data(Userspace<const u32*> address)
 
 KResult Process::poke_user_data(Userspace<u32*> address, u32 data)
 {
-    ProcessPagingScope scope(*this);
     Range range = { VirtualAddress(address), sizeof(u32) };
     auto* region = find_region_containing(range);
     if (!region)
         return KResult(-EFAULT);
+    ProcessPagingScope scope(*this);
     if (region->is_shared()) {
         // If the region is shared, we change its vmobject to a PrivateInodeVMObject
         // to prevent the write operation from changing any shared inode data
@@ -97,11 +97,11 @@ KResult Process::poke_user_data(Userspace<u32*> address, u32 data)
     });
 
     if (!copy_to_user(address, &data)) {
-        dbg() << "Invalid address for poke_user_data: " << address.ptr();
+        dbgln("poke_user_data: Bad address {:p}", address.ptr());
         return KResult(-EFAULT);
     }
 
-    return KResult(KSuccess);
+    return KSuccess;
 }
 
 }

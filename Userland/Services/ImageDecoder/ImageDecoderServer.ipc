@@ -1,0 +1,6 @@
+endpoint ImageDecoderServer = 7001
+{
+    Greet(i32 client_pid) => (i32 client_id, i32 server_pid)
+
+    DecodeImage(Core::AnonymousBuffer data) => (Gfx::ShareableBitmap bitmap)
+}

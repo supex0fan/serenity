@@ -27,6 +27,7 @@
 #pragma once
 
 #include <AK/SinglyLinkedList.h>
+#include <AK/StdLibExtras.h>
 
 namespace AK {
 
@@ -34,8 +35,8 @@ template<typename T>
 class SinglyLinkedListWithCount : private SinglyLinkedList<T> {
 
 public:
-    SinglyLinkedListWithCount() { }
-    ~SinglyLinkedListWithCount() { }
+    SinglyLinkedListWithCount() = default;
+    ~SinglyLinkedListWithCount() = default;
 
     using List = SinglyLinkedList<T>;
 
@@ -106,16 +107,16 @@ public:
     ConstIterator begin() const { return List::begin(); }
     ConstIterator end() const { return List::end(); }
 
-    template<typename Finder>
-    ConstIterator find(Finder finder) const
+    template<typename TUnaryPredicate>
+    ConstIterator find(TUnaryPredicate&& pred) const
     {
-        return List::find(finder);
+        return List::find_if(forward<TUnaryPredicate>(pred));
     }
 
-    template<typename Finder>
-    Iterator find(Finder finder)
+    template<typename TUnaryPredicate>
+    Iterator find(TUnaryPredicate&& pred)
     {
-        return List::find(finder);
+        return List::find_if(forward<TUnaryPredicate>(pred));
     }
 
     ConstIterator find(const T& value) const

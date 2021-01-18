@@ -24,7 +24,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <AK/AnyOf.h>
 #include <AK/ByteBuffer.h>
+#include <AK/Find.h>
 #include <AK/FlyString.h>
 #include <AK/Memory.h>
 #include <AK/String.h>
@@ -86,14 +88,14 @@ Vector<StringView> StringView::split_view(const StringView& separator, bool keep
 
     Vector<StringView> parts;
 
-    auto maybe_separator_index = find_first_of(separator);
+    auto maybe_separator_index = find(separator);
     while (maybe_separator_index.has_value()) {
         auto separator_index = maybe_separator_index.value();
         auto part_with_separator = view.substring_view(0, separator_index + separator.length());
         if (keep_empty || separator_index > 0)
             parts.append(part_with_separator.substring_view(0, separator_index));
         view = view.substring_view_starting_after_substring(part_with_separator);
-        maybe_separator_index = view.find_first_of(separator);
+        maybe_separator_index = view.find(separator);
     }
     if (keep_empty || !view.is_empty())
         parts.append(view);
@@ -243,6 +245,8 @@ template Optional<u8> StringView::to_uint() const;
 template Optional<u16> StringView::to_uint() const;
 template Optional<u32> StringView::to_uint() const;
 template Optional<u64> StringView::to_uint() const;
+template Optional<long> StringView::to_uint() const;
+template Optional<long long> StringView::to_uint() const;
 
 unsigned StringView::hash() const
 {
@@ -268,21 +272,23 @@ bool StringView::operator==(const String& string) const
 
 Optional<size_t> StringView::find_first_of(char c) const
 {
-    for (size_t pos = 0; pos < m_length; ++pos) {
-        if (m_characters[pos] == c)
-            return pos;
+    if (const auto location = AK::find(begin(), end(), c); location != end()) {
+        return location.index();
     }
     return {};
 }
 
 Optional<size_t> StringView::find_first_of(const StringView& view) const
 {
-    for (size_t pos = 0; pos < m_length; ++pos) {
-        char c = m_characters[pos];
-        for (char view_char : view) {
-            if (c == view_char)
-                return pos;
-        }
+    if (const auto location = AK::find_if(begin(), end(),
+            [&](const auto c) {
+                return AK::any_of(view.begin(), view.end(),
+                    [&](const auto view_char) {
+                        return c == view_char;
+                    });
+            });
+        location != end()) {
+        return location.index();
     }
     return {};
 }
@@ -306,6 +312,16 @@ Optional<size_t> StringView::find_last_of(const StringView& view) const
         }
     }
     return {};
+}
+
+Optional<size_t> StringView::find(char c) const
+{
+    return find(StringView { &c, 1 });
+}
+
+Optional<size_t> StringView::find(const StringView& view) const
+{
+    return StringUtils::find(*this, view);
 }
 
 String StringView::to_string() const { return String { *this }; }

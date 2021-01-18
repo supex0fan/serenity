@@ -34,8 +34,8 @@ namespace AK {
 
 class JsonArray {
 public:
-    JsonArray() { }
-    ~JsonArray() { }
+    JsonArray() = default;
+    ~JsonArray() = default;
 
     JsonArray(const JsonArray& other)
         : m_values(other.m_values)
@@ -45,6 +45,13 @@ public:
     JsonArray(JsonArray&& other)
         : m_values(move(other.m_values))
     {
+    }
+
+    template<typename T>
+    JsonArray(const Vector<T>& vector)
+    {
+        for (auto& value : vector)
+            m_values.append(move(value));
     }
 
     JsonArray& operator=(const JsonArray& other)

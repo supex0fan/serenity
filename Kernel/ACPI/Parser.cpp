@@ -66,7 +66,7 @@ void Parser::locate_static_data()
 PhysicalAddress Parser::find_table(const StringView& signature)
 {
 #ifdef ACPI_DEBUG
-    dbg() << "ACPI: Calling Find Table method!";
+    dbgln("ACPI: Calling Find Table method!");
 #endif
     for (auto p_sdt : m_sdt_pointers) {
         auto sdt = map_typed<Structures::SDTHeader>(p_sdt);
@@ -150,18 +150,18 @@ void Parser::access_generic_address(const Structures::GenericAddressStructure& s
     switch ((GenericAddressStructure::AddressSpace)structure.address_space) {
     case GenericAddressStructure::AddressSpace::SystemIO: {
         IOAddress address(structure.address);
-        dbg() << "ACPI: Sending value 0x" << String::format("%x", value) << " to " << address;
+        dbgln("ACPI: Sending value {:x} to {:p}", value, address);
         switch (structure.access_size) {
         case (u8)GenericAddressStructure::AccessSize::QWord: {
-            dbg() << "Trying to send QWord to IO port";
+            dbgln("Trying to send QWord to IO port");
             ASSERT_NOT_REACHED();
             break;
         }
         case (u8)GenericAddressStructure::AccessSize::Undefined: {
-            dbg() << "ACPI Warning: Unknown access size " << structure.access_size;
+            dbgln("ACPI Warning: Unknown access size {}", structure.access_size);
             ASSERT(structure.bit_width != (u8)GenericAddressStructure::BitWidth::QWord);
             ASSERT(structure.bit_width != (u8)GenericAddressStructure::BitWidth::Undefined);
-            dbg() << "ACPI: Bit Width - " << structure.bit_width << " bits";
+            dbgln("ACPI: Bit Width - {} bits", structure.bit_width);
             address.out(value, structure.bit_width);
             break;
         }
@@ -172,7 +172,7 @@ void Parser::access_generic_address(const Structures::GenericAddressStructure& s
         return;
     }
     case GenericAddressStructure::AddressSpace::SystemMemory: {
-        dbg() << "ACPI: Sending value 0x" << String::format("%x", value) << " to " << PhysicalAddress(structure.address);
+        dbgln("ACPI: Sending value {:x} to {}", value, PhysicalAddress(structure.address));
         switch ((GenericAddressStructure::AccessSize)structure.access_size) {
         case GenericAddressStructure::AccessSize::Byte:
             *map_typed<u8>(PhysicalAddress(structure.address)) = value;
@@ -195,10 +195,10 @@ void Parser::access_generic_address(const Structures::GenericAddressStructure& s
     case GenericAddressStructure::AddressSpace::PCIConfigurationSpace: {
         // According to the ACPI specification 6.2, page 168, PCI addresses must be confined to devices on Segment group 0, bus 0.
         auto pci_address = PCI::Address(0, 0, ((structure.address >> 24) & 0xFF), ((structure.address >> 16) & 0xFF));
-        dbg() << "ACPI: Sending value 0x" << String::format("%x", value) << " to " << pci_address;
+        dbgln("ACPI: Sending value {:x} to {}", value, pci_address);
         u32 offset_in_pci_address = structure.address & 0xFFFF;
         if (structure.access_size == (u8)GenericAddressStructure::AccessSize::QWord) {
-            dbg() << "Trying to send QWord to PCI configuration space";
+            dbgln("Trying to send QWord to PCI configuration space");
             ASSERT_NOT_REACHED();
         }
         ASSERT(structure.access_size != (u8)GenericAddressStructure::AccessSize::Undefined);
@@ -244,7 +244,7 @@ size_t Parser::get_table_size(PhysicalAddress table_header)
 {
     InterruptDisabler disabler;
 #ifdef ACPI_DEBUG
-    dbg() << "ACPI: Checking SDT Length";
+    dbgln("ACPI: Checking SDT Length");
 #endif
     return map_typed<Structures::SDTHeader>(table_header)->length;
 }
@@ -253,7 +253,7 @@ u8 Parser::get_table_revision(PhysicalAddress table_header)
 {
     InterruptDisabler disabler;
 #ifdef ACPI_DEBUG
-    dbg() << "ACPI: Checking SDT Revision";
+    dbgln("ACPI: Checking SDT Revision");
 #endif
     return map_typed<Structures::SDTHeader>(table_header)->revision;
 }
@@ -261,7 +261,7 @@ u8 Parser::get_table_revision(PhysicalAddress table_header)
 void Parser::initialize_main_system_description_table()
 {
 #ifdef ACPI_DEBUG
-    dbg() << "ACPI: Checking Main SDT Length to choose the correct mapping size";
+    dbgln("ACPI: Checking Main SDT Length to choose the correct mapping size");
 #endif
     ASSERT(!m_main_system_description_table.is_null());
     auto length = get_table_size(m_main_system_description_table);
@@ -280,7 +280,7 @@ void Parser::initialize_main_system_description_table()
 #endif
         for (u32 i = 0; i < ((length - sizeof(Structures::SDTHeader)) / sizeof(u64)); i++) {
 #ifdef ACPI_DEBUG
-            dbg() << "ACPI: Found new table [" << i << "], @ V 0x" << String::format("%x", &xsdt.table_ptrs[i]) << " - P 0x" << String::format("%x", xsdt.table_ptrs[i]);
+            dbg() << "ACPI: Found new table [" << i << "], @ V " << String::format("%p", &xsdt.table_ptrs[i]) << " - P 0x" << String::format("%llx", xsdt.table_ptrs[i]);
 #endif
             m_sdt_pointers.append(PhysicalAddress(xsdt.table_ptrs[i]));
         }
@@ -293,7 +293,7 @@ void Parser::initialize_main_system_description_table()
 #endif
         for (u32 i = 0; i < ((length - sizeof(Structures::SDTHeader)) / sizeof(u32)); i++) {
 #ifdef ACPI_DEBUG
-            dbg() << "ACPI: Found new table [" << i << "], @ V 0x" << String::format("%x", &rsdt.table_ptrs[i]) << " - P 0x" << String::format("%x", rsdt.table_ptrs[i]);
+            dbg() << "ACPI: Found new table [" << i << "], @ V " << String::format("%p", &rsdt.table_ptrs[i]) << " - P 0x" << String::format("%x", rsdt.table_ptrs[i]);
 #endif
             m_sdt_pointers.append(PhysicalAddress(rsdt.table_ptrs[i]));
         }

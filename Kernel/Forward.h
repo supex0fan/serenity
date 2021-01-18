@@ -37,6 +37,7 @@ class DiskCache;
 class DoubleBuffer;
 class File;
 class FileDescription;
+class FutexQueue;
 class IPv4Socket;
 class Inode;
 class InodeIdentifier;
@@ -60,7 +61,6 @@ class RangeAllocator;
 class Region;
 class Scheduler;
 class SchedulerPerProcessorData;
-class SharedBuffer;
 class Socket;
 template<typename BaseType>
 class SpinLock;

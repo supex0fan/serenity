@@ -28,6 +28,10 @@ String of characters that are not _Special_ or _Syntactic Elements_
 ##### Glob
 String of characters containing at least one of `*?` in _bareword_ position
 
+##### History Events
+A _designator_ starting with `!` in _bareword_ position that describes a word or a range of words from a previously entered command.
+Please look at the section named 'History Event Designators' for a more thorough explanation. Only allowed in interactive mode.
+
 ##### Single Quoted String
 Any sequence of characters between two single quotes (`'`)
 
@@ -36,6 +40,7 @@ Any sequence of _Double Quoted String Part_ tokens:
 * Barewords
 * Single Quotes
 * Variable References
+* History Events
 * Evaluate expressions
 * Escaped sequences
 
@@ -177,12 +182,12 @@ rm test && echo "deleted!" || echo "failed with $?"
 
 ##### Conditionals
 Conditionals can either be expressed with the _Logical Relations_, or via explicit `if` expressions.
-An `if` expression contains at least a _condition_ and a _then clause_, and optionally the `else` keyword followed by an _else clause_.
+An `if` expression contains at least a _condition_ command and a _then clause_, and optionally the `else` keyword followed by an _else clause_.
 An _else clause_ may contain another `if` expression instead of a normal block.
 
 The _then clause_ **must** be surrounded by braces, but the _else clause_ may also be another `if` expression.
 
-An `if` expression evaluates either the _then clause_ or (if available) the _else clause_, based on the exit code of the _condition_; should the exit code be zero, the _then clause_ will be executed, and if not, the _else clause_ will.
+An `if` expression evaluates either the _then clause_ or (if available) the _else clause_, based on the exit code of the _condition_ command; should the exit code be zero, the _then clause_ will be executed, and if not, the _else clause_ will.
 
 ###### Examples
 ```sh
@@ -232,15 +237,6 @@ The behaviour regarding SIGINT and other signals is the same as for loops (menti
 loop {
     rm -f foo
 }
-```
-
-###### Examples
-```sh
-# Iterate over every non-hidden file in the current directory, and prepend '1-' to its name.
-$ for * { mv $it 1-$it }
-
-# Iterate over a sequence and write each element to a file
-$ for i in $(seq 1 100) { echo $i >> foo }
 ```
 
 ##### Subshells
@@ -308,6 +304,25 @@ match "$(make_some_value)" {
     say\ * as (expr) { echo "No, I will not say $expr!" }
 }
 ```
+
+### History Event Designators
+History expansion may be utilised to reuse previously typed words or commands.
+Such expressions are of the general form `!<event_designator>(:<word_designator>)`, where `event_designator` would select an entry in the shell history, and `word_designator` would select a word (or a range of words) from that entry.
+
+| Event designator | effect                      |
+| :-               | :-----                      |
+| `!`              | Select the immediately preceding command |
+| _n_              | Select the _n_'th entry in the history   |
+| -_n_             | Select the last _n_'th entry in the history |
+| _str_            | Select the most recent entry starting with _str_ |
+| ?_str_           | Select the most recent entry containing _str_ |
+
+| Word designator  | effect                      |
+| :--              | :-----                      |
+| _n_              | The _n_'th word, starting with 0 as the command |
+| `^`              | The first word (index 0) |
+| `$`              | The last word |
+| _x_-_y_          | The range of words starting at _x_ and ending at _y_ (inclusive) |
 
 ## Formal Grammar
 
@@ -382,6 +397,7 @@ list_expression :: ' '* expression (' '+ list_expression)?
 expression :: evaluate expression?
             | string_composite expression?
             | comment expression?
+            | history_designator expression?
             | '(' list_expression ')' expression?
 
 evaluate :: '$' '(' pipe_sequence ')'
@@ -391,7 +407,7 @@ string_composite :: string string_composite?
                   | variable string_composite?
                   | bareword string_composite?
                   | glob string_composite?
-                  | brace string_composite?
+                  | brace_expansion string_composite?
 
 string :: '"' dquoted_string_inner '"'
         | "'" [^']* "'"
@@ -410,6 +426,18 @@ variable :: '$' identifier
           | ...
 
 comment :: '#' [^\n]*
+
+history_designator :: '!' event_selector (':' word_selector_composite)?
+
+event_selector :: '!'                  {== '-0'}
+                | '?' bareword '?'
+                | bareword             {number: index, otherwise: lookup}
+
+word_selector_composite :: word_selector ('-' word_selector)?
+
+word_selector :: number
+               | '^'                   {== 0}
+               | '$'                   {== end}
 
 bareword :: [^"'*$&#|()[\]{} ?;<>] bareword?
           | '\' [^"'*$&#|()[\]{} ?;<>] bareword?

@@ -39,7 +39,6 @@ int Process::sys$select(const Syscall::SC_select_params* user_params)
     REQUIRE_PROMISE(stdio);
     Syscall::SC_select_params params;
 
-    SmapDisabler disabler;
     if (!copy_from_user(&params, user_params))
         return -EFAULT;
 
@@ -91,7 +90,7 @@ int Process::sys$select(const Syscall::SC_select_params* user_params)
 
         auto description = file_description(fd);
         if (!description) {
-            dbg() << "sys$select: Bad fd number " << fd;
+            dbgln("sys$select: Bad fd number {}", fd);
             return -EBADF;
         }
         fds_info.append({ description.release_nonnull(), (Thread::FileBlocker::BlockFlags)block_flags });
@@ -104,7 +103,7 @@ int Process::sys$select(const Syscall::SC_select_params* user_params)
 
     if (current_thread->block<Thread::SelectBlocker>(timeout, fds_info).was_interrupted()) {
 #ifdef DEBUG_POLL_SELECT
-        dbg() << "select was interrupted";
+        dbgln("select was interrupted");
 #endif
         return -EINTR;
     }
@@ -153,8 +152,6 @@ int Process::sys$poll(Userspace<const Syscall::SC_poll_params*> user_params)
     if (!copy_from_user(&params, user_params))
         return -EFAULT;
 
-    SmapDisabler disabler;
-
     Thread::BlockTimeout timeout;
     if (params.timeout) {
         timespec timeout_copy;
@@ -183,7 +180,7 @@ int Process::sys$poll(Userspace<const Syscall::SC_poll_params*> user_params)
         auto& pfd = fds_copy[i];
         auto description = file_description(pfd.fd);
         if (!description) {
-            dbg() << "sys$poll: Bad fd number " << pfd.fd;
+            dbgln("sys$poll: Bad fd number {}", pfd.fd);
             return -EBADF;
         }
         u32 block_flags = (u32)Thread::FileBlocker::BlockFlags::Exception; // always want POLLERR, POLLHUP, POLLNVAL

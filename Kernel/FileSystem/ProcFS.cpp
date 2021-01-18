@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2018-2021, Andreas Kling <kling@serenityos.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,8 +51,8 @@
 #include <Kernel/Net/TCPSocket.h>
 #include <Kernel/Net/UDPSocket.h>
 #include <Kernel/PCI/Access.h>
+#include <Kernel/PerformanceEventBuffer.h>
 #include <Kernel/Process.h>
-#include <Kernel/Profiling.h>
 #include <Kernel/Scheduler.h>
 #include <Kernel/StdLib.h>
 #include <Kernel/TTY/TTY.h>
@@ -81,13 +81,10 @@ enum ProcFileType {
     FI_Root = 1, // directory
 
     __FI_Root_Start,
-    FI_Root_mm,
-    FI_Root_mounts,
     FI_Root_df,
     FI_Root_all,
     FI_Root_memstat,
     FI_Root_cpuinfo,
-    FI_Root_inodes,
     FI_Root_dmesg,
     FI_Root_interrupts,
     FI_Root_keymap,
@@ -113,8 +110,8 @@ enum ProcFileType {
     FI_PID,
 
     __FI_PID_Start,
+    FI_PID_perf_events,
     FI_PID_vm,
-    FI_PID_vmobjects,
     FI_PID_stacks, // directory
     FI_PID_fds,
     FI_PID_unveil,
@@ -129,9 +126,6 @@ enum ProcFileType {
 
 static inline ProcessID to_pid(const InodeIdentifier& identifier)
 {
-#ifdef PROCFS_DEBUG
-    dbg() << "to_pid, index=" << String::format("%08x", identifier.index()) << " -> " << (identifier.index() >> 16);
-#endif
     return identifier.index() >> 16u;
 }
 
@@ -460,35 +454,21 @@ static bool procfs$modules(InodeIdentifier, KBufferBuilder& builder)
     return true;
 }
 
-static bool procfs$profile(InodeIdentifier, KBufferBuilder& builder)
+static bool procfs$pid_perf_events(InodeIdentifier identifier, KBufferBuilder& builder)
 {
+    auto process = Process::from_pid(to_pid(identifier));
+    if (!process)
+        return false;
+
     InterruptDisabler disabler;
 
-    JsonObjectSerializer object(builder);
-    object.add("pid", Profiling::pid().value());
-    object.add("executable", Profiling::executable_path());
+    if (!process->executable())
+        return false;
 
-    auto array = object.add_array("events");
-    bool mask_kernel_addresses = !Process::current()->is_superuser();
-    Profiling::for_each_sample([&](auto& sample) {
-        auto object = array.add_object();
-        object.add("type", "sample");
-        object.add("tid", sample.tid.value());
-        object.add("timestamp", sample.timestamp);
-        auto frames_array = object.add_array("stack");
-        for (size_t i = 0; i < Profiling::max_stack_frame_count; ++i) {
-            if (sample.frames[i] == 0)
-                break;
-            u32 address = (u32)sample.frames[i];
-            if (mask_kernel_addresses && !is_user_address(VirtualAddress(address)))
-                address = 0xdeadc0de;
-            frames_array.add(address);
-        }
-        frames_array.finish();
-    });
-    array.finish();
-    object.finish();
-    return true;
+    if (!process->perf_events())
+        return false;
+
+    return process->perf_events()->to_json(builder, process->pid(), process->executable()->absolute_path());
 }
 
 static bool procfs$net_adapters(InodeIdentifier, KBufferBuilder& builder)
@@ -581,40 +561,6 @@ static bool procfs$net_local(InodeIdentifier, KBufferBuilder& builder)
     return true;
 }
 
-static bool procfs$pid_vmobjects(InodeIdentifier identifier, KBufferBuilder& builder)
-{
-    auto process = Process::from_pid(to_pid(identifier));
-    if (!process)
-        return false;
-    builder.appendf("BEGIN       END         SIZE        NAME\n");
-    {
-        ScopedSpinLock lock(process->get_lock());
-        for (auto& region : process->regions()) {
-            builder.appendf("%x -- %x    %x    %s\n",
-                region.vaddr().get(),
-                region.vaddr().offset(region.size() - 1).get(),
-                region.size(),
-                region.name().characters());
-            builder.appendf("VMO: %s @ %x(%u)\n",
-                region.vmobject().is_anonymous() ? "anonymous" : "file-backed",
-                &region.vmobject(),
-                region.vmobject().ref_count());
-            for (size_t i = 0; i < region.vmobject().page_count(); ++i) {
-                auto& physical_page = region.vmobject().physical_pages()[i];
-                bool should_cow = false;
-                if (i >= region.first_page_index() && i <= region.last_page_index())
-                    should_cow = region.should_cow(i - region.first_page_index());
-                builder.appendf("P%x%s(%u) ",
-                    physical_page ? physical_page->paddr().get() : 0,
-                    should_cow ? "!" : "",
-                    physical_page ? physical_page->ref_count() : 0);
-            }
-            builder.appendf("\n");
-        }
-    }
-    return true;
-}
-
 static bool procfs$pid_unveil(InodeIdentifier identifier, KBufferBuilder& builder)
 {
     auto process = Process::from_pid(to_pid(identifier));
@@ -679,7 +625,7 @@ static bool procfs$pid_root(InodeIdentifier identifier, KBufferBuilder& builder)
     if (!process)
         return false;
     builder.append_bytes(process->root_directory_relative_to_global_root().absolute_path().to_byte_buffer());
-    return false;
+    return true;
 }
 
 static bool procfs$self(InodeIdentifier, KBufferBuilder& builder)
@@ -688,48 +634,11 @@ static bool procfs$self(InodeIdentifier, KBufferBuilder& builder)
     return true;
 }
 
-static bool procfs$mm(InodeIdentifier, KBufferBuilder& builder)
-{
-    InterruptDisabler disabler;
-    u32 vmobject_count = 0;
-    MemoryManager::for_each_vmobject([&](auto& vmobject) {
-        ++vmobject_count;
-        builder.appendf("VMObject: %p %s(%u): p:%4u\n",
-            &vmobject,
-            vmobject.is_anonymous() ? "anon" : "file",
-            vmobject.ref_count(),
-            vmobject.page_count());
-        return IterationDecision::Continue;
-    });
-    builder.appendf("VMO count: %u\n", vmobject_count);
-    builder.appendf("Free physical pages: %u\n", MM.user_physical_pages() - MM.user_physical_pages_used());
-    builder.appendf("Free supervisor physical pages: %u\n", MM.super_physical_pages() - MM.super_physical_pages_used());
-    return true;
-}
-
 static bool procfs$dmesg(InodeIdentifier, KBufferBuilder& builder)
 {
     InterruptDisabler disabler;
     for (char ch : Console::the().logbuffer())
         builder.append(ch);
-    return true;
-}
-
-static bool procfs$mounts(InodeIdentifier, KBufferBuilder& builder)
-{
-    // FIXME: This is obviously racy against the VFS mounts changing.
-    VFS::the().for_each_mount([&builder](auto& mount) {
-        auto& fs = mount.guest_fs();
-        builder.appendf("%s @ ", fs.class_name());
-        if (mount.host() == nullptr)
-            builder.appendf("/");
-        else {
-            builder.appendf("%u:%u", mount.host()->fsid(), mount.host()->index());
-            builder.append(' ');
-            builder.append(mount.absolute_path());
-        }
-        builder.append('\n');
-    });
     return true;
 }
 
@@ -813,9 +722,9 @@ static bool procfs$memstat(InodeIdentifier, KBufferBuilder& builder)
     json.add("kmalloc_call_count", stats.kmalloc_call_count);
     json.add("kfree_call_count", stats.kfree_call_count);
     slab_alloc_stats([&json](size_t slab_size, size_t num_allocated, size_t num_free) {
-        auto prefix = String::format("slab_%zu", slab_size);
-        json.add(String::format("%s_num_allocated", prefix.characters()), num_allocated);
-        json.add(String::format("%s_num_free", prefix.characters()), num_free);
+        auto prefix = String::formatted("slab_{}", slab_size);
+        json.add(String::formatted("{}_num_allocated", prefix), num_allocated);
+        json.add(String::formatted("{}_num_free", prefix), num_free);
     });
     json.finish();
     return true;
@@ -908,16 +817,6 @@ static bool procfs$all(InodeIdentifier, KBufferBuilder& builder)
     for (auto& process : processes)
         build_process(process);
     array.finish();
-    return true;
-}
-
-static bool procfs$inodes(InodeIdentifier, KBufferBuilder& builder)
-{
-    InterruptDisabler disabler;
-    ScopedSpinLock all_inodes_lock(Inode::all_inodes_lock());
-    for (auto& inode : Inode::all_with_lock()) {
-        builder.appendf("Inode{K%x} %02u:%08u (%u)\n", &inode, inode.fsid(), inode.index(), inode.ref_count());
-    }
     return true;
 }
 
@@ -1127,17 +1026,16 @@ ProcFSInode::~ProcFSInode()
 
 KResult ProcFSInode::refresh_data(FileDescription& description) const
 {
+    if (Kernel::is_directory(identifier()))
+        return KSuccess;
+
     auto& cached_data = description.data();
     auto* directory_entry = fs().get_directory_entry(identifier());
 
     bool (*read_callback)(InodeIdentifier, KBufferBuilder&) = nullptr;
     if (directory_entry) {
-        if (directory_entry->proc_file_type > (unsigned)FI_Root) {
-            read_callback = directory_entry->read_callback;
-            ASSERT(read_callback);
-        } else {
-            return KSuccess;
-        }
+        read_callback = directory_entry->read_callback;
+        ASSERT(read_callback);
     } else {
         switch (to_proc_parent_directory(identifier())) {
         case PDI_PID_fd:
@@ -1198,7 +1096,7 @@ void ProcFSInode::did_seek(FileDescription& description, off_t new_offset)
     auto result = refresh_data(description);
     if (result.is_error()) {
         // Subsequent calls to read will return EIO!
-        dbg() << "ProcFS: Could not refresh contents: " << result.error();
+        dbgln("ProcFS: Could not refresh contents: {}", result.error());
     }
 }
 
@@ -1277,10 +1175,6 @@ InodeMetadata ProcFSInode::metadata() const
             metadata.mode &= ~077;
         }
     }
-
-#ifdef PROCFS_DEBUG
-    dbg() << "Returning mode " << String::format("%o", metadata.mode);
-#endif
     return metadata;
 }
 
@@ -1296,7 +1190,7 @@ ssize_t ProcFSInode::read_bytes(off_t offset, ssize_t count, UserOrKernelBuffer&
         return -EIO;
     if (!description->data()) {
 #ifdef PROCFS_DEBUG
-        dbg() << "ProcFS: Do not have cached data!";
+        dbgln("ProcFS: Do not have cached data!");
 #endif
         return -EIO;
     }
@@ -1736,13 +1630,10 @@ ProcFS::ProcFS()
 {
     m_root_inode = adopt(*new ProcFSInode(*this, 1));
     m_entries.resize(FI_MaxStaticFileIndex);
-    m_entries[FI_Root_mm] = { "mm", FI_Root_mm, true, procfs$mm };
-    m_entries[FI_Root_mounts] = { "mounts", FI_Root_mounts, false, procfs$mounts };
     m_entries[FI_Root_df] = { "df", FI_Root_df, false, procfs$df };
     m_entries[FI_Root_all] = { "all", FI_Root_all, false, procfs$all };
     m_entries[FI_Root_memstat] = { "memstat", FI_Root_memstat, false, procfs$memstat };
     m_entries[FI_Root_cpuinfo] = { "cpuinfo", FI_Root_cpuinfo, false, procfs$cpuinfo };
-    m_entries[FI_Root_inodes] = { "inodes", FI_Root_inodes, true, procfs$inodes };
     m_entries[FI_Root_dmesg] = { "dmesg", FI_Root_dmesg, true, procfs$dmesg };
     m_entries[FI_Root_self] = { "self", FI_Root_self, false, procfs$self };
     m_entries[FI_Root_pci] = { "pci", FI_Root_pci, false, procfs$pci };
@@ -1752,7 +1643,6 @@ ProcFS::ProcFS()
     m_entries[FI_Root_uptime] = { "uptime", FI_Root_uptime, false, procfs$uptime };
     m_entries[FI_Root_cmdline] = { "cmdline", FI_Root_cmdline, true, procfs$cmdline };
     m_entries[FI_Root_modules] = { "modules", FI_Root_modules, true, procfs$modules };
-    m_entries[FI_Root_profile] = { "profile", FI_Root_profile, false, procfs$profile };
     m_entries[FI_Root_sys] = { "sys", FI_Root_sys, true };
     m_entries[FI_Root_net] = { "net", FI_Root_net, false };
 
@@ -1763,13 +1653,13 @@ ProcFS::ProcFS()
     m_entries[FI_Root_net_local] = { "local", FI_Root_net_local, false, procfs$net_local };
 
     m_entries[FI_PID_vm] = { "vm", FI_PID_vm, false, procfs$pid_vm };
-    m_entries[FI_PID_vmobjects] = { "vmobjects", FI_PID_vmobjects, true, procfs$pid_vmobjects };
     m_entries[FI_PID_stacks] = { "stacks", FI_PID_stacks, false };
     m_entries[FI_PID_fds] = { "fds", FI_PID_fds, false, procfs$pid_fds };
     m_entries[FI_PID_exe] = { "exe", FI_PID_exe, false, procfs$pid_exe };
     m_entries[FI_PID_cwd] = { "cwd", FI_PID_cwd, false, procfs$pid_cwd };
     m_entries[FI_PID_unveil] = { "unveil", FI_PID_unveil, false, procfs$pid_unveil };
     m_entries[FI_PID_root] = { "root", FI_PID_root, false, procfs$pid_root };
+    m_entries[FI_PID_perf_events] = { "perf_events", FI_PID_perf_events, false, procfs$pid_perf_events };
     m_entries[FI_PID_fd] = { "fd", FI_PID_fd, false };
 }
 

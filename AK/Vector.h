@@ -27,6 +27,7 @@
 #pragma once
 
 #include <AK/Assertions.h>
+#include <AK/Find.h>
 #include <AK/Forward.h>
 #include <AK/Iterator.h>
 #include <AK/Optional.h>
@@ -254,6 +255,27 @@ public:
         }
 
         --m_size;
+    }
+
+    void remove(size_t index, size_t count)
+    {
+        if (count == 0)
+            return;
+        ASSERT(index + count > index);
+        ASSERT(index + count <= m_size);
+
+        if constexpr (Traits<T>::is_trivial()) {
+            TypedTransfer<T>::copy(slot(index), slot(index + count), m_size - index - count);
+        } else {
+            for (size_t i = index; i < index + count; i++)
+                at(i).~T();
+            for (size_t i = index + count; i < m_size; ++i) {
+                new (slot(i - count)) T(move(at(i)));
+                at(i).~T();
+            }
+        }
+
+        m_size -= count;
     }
 
     void insert(size_t index, T&& value)
@@ -538,41 +560,33 @@ public:
     ConstIterator end() const { return ConstIterator::end(*this); }
     Iterator end() { return Iterator::end(*this); }
 
-    template<typename Finder>
-    ConstIterator find(Finder finder) const
+    template<typename TUnaryPredicate>
+    ConstIterator find_if(TUnaryPredicate&& finder) const
     {
-        for (size_t i = 0; i < m_size; ++i) {
-            if (finder(at(i)))
-                return ConstIterator(*this, i);
-        }
-        return end();
+        return AK::find_if(begin(), end(), forward<TUnaryPredicate>(finder));
     }
 
-    template<typename Finder>
-    Iterator find(Finder finder)
+    template<typename TUnaryPredicate>
+    Iterator find_if(TUnaryPredicate&& finder)
     {
-        for (size_t i = 0; i < m_size; ++i) {
-            if (finder(at(i)))
-                return Iterator { *this, i };
-        }
-        return end();
+        return AK::find_if(begin(), end(), forward<TUnaryPredicate>(finder));
     }
 
     ConstIterator find(const T& value) const
     {
-        return find([&](auto& other) { return Traits<T>::equals(value, other); });
+        return AK::find(begin(), end(), value);
     }
 
     Iterator find(const T& value)
     {
-        return find([&](auto& other) { return Traits<T>::equals(value, other); });
+        return AK::find(begin(), end(), value);
     }
 
     Optional<size_t> find_first_index(const T& value)
     {
-        for (size_t i = 0; i < m_size; ++i) {
-            if (Traits<T>::equals(value, at(i)))
-                return i;
+        if (const auto index = AK::find_index(begin(), end(), value);
+            index < size()) {
+            return index;
         }
         return {};
     }

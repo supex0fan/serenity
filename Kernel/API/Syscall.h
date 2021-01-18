@@ -121,15 +121,10 @@ namespace Kernel {
     S(accept)                 \
     S(listen)                 \
     S(connect)                \
-    S(shbuf_create)           \
-    S(shbuf_allow_pid)        \
-    S(shbuf_get)              \
-    S(shbuf_release)          \
     S(link)                   \
     S(chown)                  \
     S(fchmod)                 \
     S(symlink)                \
-    S(shbuf_seal)             \
     S(sendmsg)                \
     S(recvmsg)                \
     S(getsockopt)             \
@@ -156,7 +151,6 @@ namespace Kernel {
     S(dbgputch)               \
     S(dbgputstr)              \
     S(watch_file)             \
-    S(shbuf_allow_all)        \
     S(mprotect)               \
     S(realpath)               \
     S(get_process_name)       \
@@ -174,12 +168,9 @@ namespace Kernel {
     S(get_thread_name)        \
     S(madvise)                \
     S(purge)                  \
-    S(shbuf_set_volatile)     \
     S(profiling_enable)       \
     S(profiling_disable)      \
     S(futex)                  \
-    S(set_thread_boost)       \
-    S(set_process_boost)      \
     S(chroot)                 \
     S(pledge)                 \
     S(unveil)                 \
@@ -187,7 +178,6 @@ namespace Kernel {
     S(shutdown)               \
     S(get_stack_bounds)       \
     S(ptrace)                 \
-    S(minherit)               \
     S(sendfd)                 \
     S(recvfd)                 \
     S(sysconf)                \
@@ -198,7 +188,8 @@ namespace Kernel {
     S(prctl)                  \
     S(mremap)                 \
     S(set_coredump_metadata)  \
-    S(abort)
+    S(abort)                  \
+    S(anon_create)
 
 namespace Syscall {
 
@@ -234,12 +225,6 @@ struct StringArgument {
 template<typename DataType, typename SizeType>
 struct MutableBufferArgument {
     DataType* data { nullptr };
-    SizeType size { 0 };
-};
-
-template<typename DataType, typename SizeType>
-struct ImmutableBufferArgument {
-    const DataType* data { nullptr };
     SizeType size { 0 };
 };
 
@@ -325,10 +310,15 @@ struct SC_getpeername_params {
 };
 
 struct SC_futex_params {
-    const i32* userspace_address;
+    u32* userspace_address;
     int futex_op;
-    i32 val;
-    const timespec* timeout;
+    u32 val;
+    union {
+        const timespec* timeout;
+        u32 val2;
+    };
+    u32* userspace_address2;
+    u32 val3;
 };
 
 struct SC_setkeymap_params {
