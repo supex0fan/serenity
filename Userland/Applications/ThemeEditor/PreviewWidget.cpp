@@ -65,7 +65,7 @@ private:
         m_checkbox->set_text("Check box");
         m_radio = add<GUI::RadioButton>();
         m_radio->set_text("Radio button");
-        m_statusbar = add<GUI::StatusBar>();
+        m_statusbar = add<GUI::StatusBar>(1);
         m_statusbar->set_text("Status bar");
         m_editor = add<GUI::TextEditor>();
         m_editor->set_text("Text editor\nwith multiple\nlines.");

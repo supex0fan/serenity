@@ -48,6 +48,7 @@
 
     @GUI::StatusBar {
         name: "statusbar"
+        label_count: 1
 
         @GUI::ProgressBar {
             name: "progressbar"

@@ -97,7 +97,7 @@ int main(int argc, char** argv)
 
     auto& board_view = main_widget.add<BoardView>(&game.board());
     board_view.set_focus(true);
-    auto& statusbar = main_widget.add<GUI::StatusBar>();
+    auto& statusbar = main_widget.add<GUI::StatusBar>(1);
 
     auto update = [&]() {
         board_view.set_board(&game.board());
